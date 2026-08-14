@@ -5,6 +5,7 @@
 
 import { AttioResolution, resolveEntity } from "./attio";
 import { GrainResolution, resolveGrain, GrainRecordingData } from "./grain";
+import { CalendarResolution, resolveCalendar, calendarConfigured } from "./gcal";
 import { normalize } from "./match";
 import {
   ContextBundle,
@@ -99,19 +100,6 @@ function fmtDateTime(iso?: string): string {
   return m ? `${m[1]} · ${m[2]} UTC` : iso.slice(0, 10);
 }
 
-function toMeetings(recs: GrainRecordingData[]): Meeting[] {
-  return recs.map((r) => ({
-    datetime: fmtDateTime(r.date),
-    title: r.title,
-    attendees: r.participants.map((p) => ({
-      name: p.name,
-      email: p.email,
-    })),
-    recordingUrl: r.url,
-    sources: ["grain"],
-  }));
-}
-
 function notFound(query: string): ContextBundle {
   return {
     company: query,
@@ -169,19 +157,78 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   const domain = c?.domain || inferDomain(allEmails);
 
   const grainRecordings = toGrainRecordings(grain.recordings);
-  const meetings = toMeetings(grain.recordings);
-
-  // Timeline: Grain meetings + Attio's last-interaction aggregate, newest first.
-  const timeline: TimelineEntry[] = [];
-  for (const r of grain.recordings) {
-    timeline.push({
-      date: r.date ? r.date.slice(0, 10) : "",
-      type: "meeting",
-      summary: `Recorded meeting — "${r.title}"`,
-      sources: ["grain"],
-    });
+  // --- Google Calendar (recent past + upcoming) ---
+  const calTerms = [company.replace(/\(.*?\)/g, "").trim(), founder].filter(Boolean);
+  let calendar: CalendarResolution = { events: [], configured: calendarConfigured() };
+  let calError: string | undefined;
+  try {
+    calendar = await resolveCalendar(calTerms, allEmails);
+  } catch (e: any) {
+    calError = e?.message || "Calendar lookup failed";
   }
-  if (attio.lastInteractionAt) {
+
+  const todayStr = today();
+
+  // --- Reconcile meetings: a Grain recording and a calendar event are ONE meeting
+  //     when they share a day and an attendee email. Merge, don't duplicate. ---
+  const meetings: Meeting[] = grain.recordings.map((r) => ({
+    datetime: fmtDateTime(r.date),
+    title: r.title,
+    attendees: r.participants.map((p) => ({ name: p.name, email: p.email })),
+    recordingUrl: r.url,
+    sources: ["grain"],
+  }));
+  for (const ev of calendar.events) {
+    const day = ev.startISO.slice(0, 10);
+    const evEmails = new Set(
+      ev.attendees.map((a) => (a.email || "").toLowerCase()).filter(Boolean)
+    );
+    const attendees = ev.attendees.map((a) => ({
+      name: a.name,
+      email: a.email,
+      optional: a.optional,
+      rsvp: a.responseStatus,
+    }));
+    const match = meetings.find(
+      (m) =>
+        m.datetime.startsWith(day) &&
+        m.attendees.some((a) => a.email && evEmails.has(a.email.toLowerCase()))
+    );
+    if (match) {
+      match.attendees = attendees; // richer: RSVP + optional flags from calendar
+      if (!match.sources.includes("cal")) match.sources.push("cal");
+    } else {
+      meetings.push({
+        datetime: fmtDateTime(ev.startISO),
+        title: ev.title,
+        attendees,
+        recordingUrl: undefined,
+        sources: ["cal"],
+      });
+    }
+  }
+  meetings.sort((a, b) => a.datetime.localeCompare(b.datetime));
+
+  // --- Timeline, derived from the reconciled meetings (+ Attio fallbacks) ---
+  const timeline: TimelineEntry[] = meetings.map((m) => {
+    const day = m.datetime.slice(0, 10);
+    const upcoming = day > todayStr && !m.recordingUrl;
+    return {
+      date: day,
+      type: upcoming ? "upcoming" : "meeting",
+      summary: `${upcoming ? "Upcoming meeting" : "Meeting"} — "${m.title}"`,
+      sources: m.sources,
+    };
+  });
+  // Fall back to Attio's aggregate calendar signal only when Google isn't giving events.
+  if (!calendar.configured || calendar.events.length === 0) {
+    const nextDay = attio.nextMeetingAt?.slice(0, 10);
+    if (nextDay && nextDay >= todayStr)
+      timeline.push({ date: nextDay, type: "upcoming", summary: "Upcoming meeting on the calendar", sources: ["cal"] });
+    if (attio.lastMeetingAt && grain.recordings.length === 0)
+      timeline.push({ date: attio.lastMeetingAt.slice(0, 10), type: "meeting", summary: "Most recent calendar meeting", sources: ["cal"] });
+  }
+  if (attio.lastInteractionAt && meetings.length === 0) {
     timeline.push({
       date: attio.lastInteractionAt.slice(0, 10),
       type: "interaction",
@@ -189,29 +236,19 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       sources: ["attio"],
     });
   }
-  // Calendar signals from Attio's mirror (full event list arrives with Google Calendar).
-  const todayStr = today();
-  const nextMeetingDay = attio.nextMeetingAt?.slice(0, 10);
-  if (nextMeetingDay && nextMeetingDay >= todayStr) {
-    timeline.push({
-      date: nextMeetingDay,
-      type: "upcoming",
-      summary: "Upcoming meeting on the calendar",
-      sources: ["cal"],
-    });
-  }
-  if (attio.lastMeetingAt && grain.recordings.length === 0) {
-    timeline.push({
-      date: attio.lastMeetingAt.slice(0, 10),
-      type: "meeting",
-      summary: "Most recent calendar meeting",
-      sources: ["cal"],
-    });
-  }
   timeline.sort((a, b) => b.date.localeCompare(a.date));
 
+  const upcomingMeetings = meetings.filter((m) => m.datetime.slice(0, 10) > todayStr);
+  const nextMeetingDay =
+    upcomingMeetings[0]?.datetime.slice(0, 10) ||
+    (attio.nextMeetingAt && attio.nextMeetingAt.slice(0, 10) >= todayStr
+      ? attio.nextMeetingAt.slice(0, 10)
+      : undefined);
+
+  const hasPast =
+    meetings.some((m) => m.datetime.slice(0, 10) <= todayStr) || grain.recordings.length > 0;
   const regime: ContextBundle["regime"] =
-    grain.recordings.length > 0 ||
+    hasPast ||
     !!attio.lastInteractionAt ||
     !!d?.firstMeetingRecording ||
     (!!d?.status && !/^(new|inbound|to review|n\/a)$/i.test(d.status))
@@ -257,12 +294,20 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   };
 
   // Gaps — honest about what's still not wired.
-  const gaps: Gap[] = [
-    {
-      description: "Calendar and email are not yet connected",
-      resolution: "Coming next — the meeting timeline and email thread (intro + outcome) will fill in",
-    },
-  ];
+  const gaps: Gap[] = [];
+  if (!calendar.configured) {
+    gaps.push({
+      description: "Google Calendar isn't connected yet",
+      resolution: "Run scripts/google-auth.mjs to add the full meeting list (attendees + RSVPs)",
+    });
+  }
+  gaps.push({
+    description: "Email thread not yet connected",
+    resolution: "Coming next — the intro source and outcome from the email thread",
+  });
+  if (calError) {
+    gaps.push({ description: `Calendar lookup failed: ${calError}`, resolution: "Check the Google credentials / refresh token" });
+  }
   if (grainError) {
     gaps.push({ description: `Grain lookup failed: ${grainError}`, resolution: "Check the GRAIN_PAT token" });
   }
@@ -279,7 +324,11 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     });
   }
 
-  const sourcesChecked = [attio.found ? "Attio" : null, "Grain"].filter(Boolean) as string[];
+  const sourcesChecked = [
+    attio.found ? "Attio" : null,
+    "Grain",
+    calendar.configured ? "Calendar" : null,
+  ].filter(Boolean) as string[];
 
   return {
     company,
