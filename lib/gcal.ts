@@ -99,6 +99,30 @@ async function listCalendars(token: string): Promise<string[]> {
   return ids.length ? ids : ["primary"];
 }
 
+/** First-name tokens of the 2048 team, from their @2048.vc calendars — used to
+ *  strip internal partner names out of meeting titles. Cached per process. */
+let cachedInternalTokens: string[] | null = null;
+export async function internalNameTokens(): Promise<string[]> {
+  if (cachedInternalTokens) return cachedInternalTokens;
+  if (!calendarConfigured()) return [];
+  const token = await accessToken();
+  const res = await fetch(`${CAL_BASE}/users/me/calendarList`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const items = (await res.json()).items || [];
+  const toks = new Set<string>();
+  for (const c of items) {
+    const id = String(c.id || "").toLowerCase();
+    if (id.endsWith("@2048.vc")) {
+      for (const t of id.split("@")[0].split(/[._-]/)) if (t.length > 2) toks.add(t);
+    }
+  }
+  cachedInternalTokens = [...toks];
+  return cachedInternalTokens;
+}
+
 async function listEvents(
   calendarId: string,
   query: string,
@@ -146,6 +170,33 @@ function parseEvent(raw: any, nowMs: number): GCalEvent {
     organizerEmail: raw.organizer?.email,
     htmlLink: raw.htmlLink,
   };
+}
+
+/**
+ * List the user's own meetings in a ±window (their primary calendar) — the basis
+ * for the "your meetings this week" search pre-selects. No company filter here.
+ */
+export async function listPrimaryWindow(
+  daysBack: number,
+  daysForward: number
+): Promise<GCalEvent[]> {
+  if (!calendarConfigured()) return [];
+  const token = await accessToken();
+  const now = Date.now();
+  const params = new URLSearchParams({
+    timeMin: new Date(now - daysBack * 864e5).toISOString(),
+    timeMax: new Date(now + daysForward * 864e5).toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "50",
+  });
+  const res = await fetch(`${CAL_BASE}/calendars/primary/events?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.items || []).map((raw: any) => parseEvent(raw, now));
 }
 
 /**
