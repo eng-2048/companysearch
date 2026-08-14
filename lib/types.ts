@@ -64,6 +64,7 @@ export interface Meeting {
   recordingUrl?: string; // Grain link, or undefined = "none"
   notesRef?: string; // Attio note ref, or undefined
   upcoming?: boolean; // start is in the future (time-based, not just date)
+  startISO?: string; // raw start timestamp, for chronological sorting
   sources: SourceTag[];
 }
 

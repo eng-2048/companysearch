@@ -14,6 +14,15 @@ export function normalize(s: string): string {
     .trim();
 }
 
+/** "16:15" -> "4:15 PM". Formats a 24h HH:MM string as 12-hour with AM/PM. */
+export function to12h(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  if (Number.isNaN(h)) return hhmm;
+  const ampm = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m ?? 0).padStart(2, "0")} ${ampm}`;
+}
+
 /** True if `needle` appears as a whole word (or whole phrase) in `haystack`. */
 export function wholeWordMatch(haystack: string, needle: string): boolean {
   const h = ` ${normalize(haystack)} `;

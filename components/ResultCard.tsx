@@ -175,12 +175,10 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
             {b.meetings.length > 0 &&
               (() => {
                 const isUpcoming = (m: (typeof b.meetings)[number]) => !!m.upcoming;
-                const upcoming = b.meetings
-                  .filter(isUpcoming)
-                  .sort((a, x) => a.datetime.localeCompare(x.datetime));
-                const past = b.meetings
-                  .filter((m) => !isUpcoming(m))
-                  .sort((a, x) => x.datetime.localeCompare(a.datetime));
+                const ms = (m: (typeof b.meetings)[number]) =>
+                  m.startISO ? new Date(m.startISO).getTime() : 0;
+                const upcoming = b.meetings.filter(isUpcoming).sort((a, x) => ms(a) - ms(x));
+                const past = b.meetings.filter((m) => !isUpcoming(m)).sort((a, x) => ms(x) - ms(a));
                 const rsvpLabel = (s?: string) =>
                   !s || s === "accepted"
                     ? ""

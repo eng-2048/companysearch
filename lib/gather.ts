@@ -6,7 +6,7 @@
 import { AttioResolution, resolveEntity } from "./attio";
 import { GrainResolution, resolveGrain, GrainRecordingData } from "./grain";
 import { CalendarResolution, resolveCalendar, calendarConfigured } from "./gcal";
-import { normalize } from "./match";
+import { normalize, to12h } from "./match";
 import {
   ContextBundle,
   Gap,
@@ -96,8 +96,10 @@ function toGrainRecordings(recs: GrainRecordingData[]): GrainRecording[] {
 
 function fmtDateTime(iso?: string): string {
   if (!iso) return "";
-  const m = iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  return m ? `${m[1]} · ${m[2]} UTC` : iso.slice(0, 10);
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  // Show the event's wall-clock time in 12-hour form. (No tz label: calendar
+  // events are already in local time; a "UTC" suffix here was misleading.)
+  return m ? `${m[1]} · ${to12h(`${m[2]}:${m[3]}`)}` : iso.slice(0, 10);
 }
 
 function notFound(query: string): ContextBundle {
@@ -177,6 +179,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     attendees: r.participants.map((p) => ({ name: p.name, email: p.email })),
     recordingUrl: r.url,
     upcoming: false, // a recorded meeting already happened
+    startISO: r.date,
     sources: ["grain"],
   }));
   for (const ev of calendar.events) {
@@ -205,11 +208,13 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
         attendees,
         recordingUrl: undefined,
         upcoming: ev.upcoming,
+        startISO: ev.startISO,
         sources: ["cal"],
       });
     }
   }
-  meetings.sort((a, b) => a.datetime.localeCompare(b.datetime));
+  const startMs = (m: Meeting) => (m.startISO ? new Date(m.startISO).getTime() : 0);
+  meetings.sort((a, b) => startMs(a) - startMs(b));
 
   // --- Timeline, derived from the reconciled meetings (+ Attio fallbacks) ---
   const timeline: TimelineEntry[] = meetings.map((m) => ({

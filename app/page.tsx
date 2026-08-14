@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ContextBundle, SearchEvent } from "@/lib/types";
+import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
 
 interface Suggestion {
@@ -122,7 +123,7 @@ export default function Home() {
       <span className="dd-term">{s.term}</span>
       <span className="dd-meta">
         {fmtDay(s.date)}
-        {s.time ? ` · ${s.time}` : ""} · {s.title}
+        {s.time ? ` · ${to12h(s.time)}` : ""} · {s.title}
       </span>
     </button>
   );
