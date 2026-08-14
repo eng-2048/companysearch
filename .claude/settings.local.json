@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find / -type d -name \"company-search\")",
+      "Bash(find / -path \"*anthropic-skills*company*\")",
+      "Bash(cd \"/Users/zann/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a93c4dbe-2dd4-4f39-8a54-177adfe656fb/597e0016-6c1c-4757-87b4-79471705a870/skills/company-search\" && ls -la && echo \"===TREE===\" && find . -type f | head -50)",
+      "Read(//Users/zann/**)",
+      "Read(//Users/zann/.claude/**)",
+      "Bash(claude mcp *)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/local/bin/**)",
+      "Bash(python3 -)"
+    ]
+  }
+}
