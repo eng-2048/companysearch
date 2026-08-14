@@ -318,6 +318,61 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     missingLinked.map((id) => getRecord(COMPANIES_OBJECT, id))
   );
   for (const c of linkedFetched) if (c) companyById.set(recordId(c), c);
+
+  // Fallback for stealth deals with no person record and a company name that
+  // isn't the founder's (e.g. "Immortal Security" for Aurnov Chattopadhyay): the
+  // only Attio link to the founder is the deal_flow CEO/CTO LinkedIn slug
+  // ("…/in/aurnovcy"). Match the founder-name query against those slugs, and
+  // accept only an UNAMBIGUOUS single hit (avoids common-first-name collisions).
+  let matchedViaLinkedin = false;
+  if (companyById.size === 0 && queryIsPerson) {
+    const nameTokens = qn.split(" ").filter((t) => t.length >= 3);
+    const firstTok = nameTokens[0];
+    const lastTok = nameTokens[nameTokens.length - 1];
+    // Gather candidate deal_flow parents whose CEO/CTO LinkedIn contains any
+    // long name token (last names like "chattopadhyay" also match relatives'
+    // records, so this is only a candidate set — we disambiguate next).
+    const parents = new Set<string>();
+    for (const tok of nameTokens.filter((t) => t.length >= 5)) {
+      for (const field of ["ceo_linkedin", "cto_linkedin"]) {
+        try {
+          const r = await api(`/lists/${DEAL_FLOW_SLUG}/entries/query`, {
+            filter: { [field]: { $contains: tok } },
+            limit: 5,
+          });
+          for (const e of r.data || []) if (e.parent_record_id) parents.add(e.parent_record_id);
+        } catch {
+          /* field not filterable — ignore */
+        }
+      }
+    }
+    // Score each candidate by how well its LinkedIn slug matches the full name —
+    // the first name is the specific identifier ("aurnovcy" vs "…chattopadhyay").
+    const scored: { rec: any; score: number }[] = [];
+    for (const pid of parents) {
+      const entries = await recordEntries(COMPANIES_OBJECT, pid);
+      const de = entries.find((e) => e.list_api_slug === DEAL_FLOW_SLUG);
+      if (!de) continue;
+      const entry = await getDealFlowEntry(de.entry_id);
+      const ev = entry?.entry_values || {};
+      const slugText = [textVal(ev.ceo_linkedin), textVal(ev.cto_linkedin)]
+        .map((u) => linkedinSlug(u) || "")
+        .join(" ")
+        .replace(/[^a-z0-9]/g, "");
+      let score = 0;
+      if (firstTok && slugText.includes(firstTok)) score += 2;
+      if (lastTok && lastTok !== firstTok && slugText.includes(lastTok)) score += 1;
+      const rec = await getRecord(COMPANIES_OBJECT, pid);
+      if (rec) scored.push({ rec, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    // Accept only a confident, unambiguous winner (first name must be present).
+    if (scored[0]?.score >= 2 && (scored.length === 1 || scored[0].score > scored[1].score)) {
+      companyById.set(recordId(scored[0].rec), scored[0].rec);
+      matchedViaLinkedin = true;
+    }
+  }
+
   const candidateCompanies = [...companyById.values()];
 
   if (candidateCompanies.length === 0) {
@@ -470,23 +525,27 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     isStealthName(featuredRawName) || recordDomains(featured).length === 0;
 
   // Founder display name: the CEO if we identified one, else the first real
-  // person; otherwise, for a stealth deal whose company record is named for the
-  // founder, the cleaned company name.
+  // person; otherwise the founder we matched via the CEO LinkedIn slug (the
+  // query itself), or, for a stealth deal named for the founder, the company name.
   let founderName: string | undefined = ceoPersonName || people[0]?.name;
-  if (!founderName && featuredStealth && looksLikePersonName(featuredRawName)) {
-    founderName = featuredRawName.replace(/\(.*?\)/g, "").trim();
+  if (!founderName) {
+    if (matchedViaLinkedin) founderName = term; // the query is the CEO we matched
+    else if (featuredStealth && looksLikePersonName(featuredRawName)) {
+      founderName = featuredRawName.replace(/\(.*?\)/g, "").trim();
+    }
   }
 
-  // Synthesize a founder ONLY for the stealth-named-by-founder case — never for a
-  // real company that simply has no linked person record.
+  // Synthesize a founder for the stealth-named-by-founder case, or when we matched
+  // the founder via the CEO LinkedIn slug — never for a real company with no
+  // linked person record.
   const displayPeople = [...people];
-  if (displayPeople.length === 0 && founderName && featuredStealth) {
+  if (displayPeople.length === 0 && founderName && (featuredStealth || matchedViaLinkedin)) {
     displayPeople.push({
       name: founderName,
       recordId: "",
       emails: [],
       linkedin: dealFlow?.ceoLinkedin,
-      jobTitle: "Founder",
+      jobTitle: matchedViaLinkedin ? "CEO" : "Founder",
     });
   }
 
