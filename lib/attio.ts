@@ -220,6 +220,55 @@ function noteBodyExtract(n: any): string {
 const normName = (s: string): string =>
   s.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 
+const titleCase = (s: string): string =>
+  s.replace(/\b[a-z]/g, (m) => m.toUpperCase());
+
+/** "rooshil@autonomyhealth.io" -> "Rooshil"; "john.smith@x.com" -> "John Smith". */
+function nameFromEmail(email?: string): string | undefined {
+  if (!email) return undefined;
+  const local = email.split("@")[0];
+  const parts = local
+    .split(/[._-]+/)
+    .filter((p) => p && !/^\d+$/.test(p) && p.length > 1);
+  if (parts.length === 0) return undefined;
+  return titleCase(parts.join(" "));
+}
+
+/** Extract the /in/<slug> handle from a LinkedIn URL. */
+function linkedinSlug(url?: string): string | undefined {
+  if (!url) return undefined;
+  const m = url.match(/\/in\/([^/?#]+)/i);
+  return m ? m[1].toLowerCase() : undefined;
+}
+
+/** "natalie-curnes-92844597" -> "Natalie Curnes"; "rooshilshah" -> undefined (no split). */
+function nameFromSlug(slug?: string): string | undefined {
+  if (!slug) return undefined;
+  const parts = slug
+    .split(/[-.]+/)
+    .filter((p) => p && !/\d/.test(p) && p.length > 1);
+  if (parts.length < 2) return undefined; // single concatenated token can't be split safely
+  return titleCase(parts.join(" "));
+}
+
+/** Does this person plausibly own this LinkedIn slug (by email local part or name)? */
+function personMatchesSlug(
+  emails: string[],
+  name: string | undefined,
+  slug: string
+): boolean {
+  const s = slug.replace(/[^a-z0-9]/g, "");
+  for (const e of emails) {
+    const local = e.split("@")[0].replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (local.length >= 3 && s.includes(local)) return true;
+  }
+  if (name) {
+    const tokens = normName(name).split(" ").filter((t) => t.length >= 3);
+    if (tokens.length && tokens.every((t) => s.includes(t))) return true;
+  }
+  return false;
+}
+
 /**
  * Step 1 of the skill, as deterministic API calls.
  *
@@ -345,10 +394,16 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
   const addPerson = (rec: any, roleFallback?: string) => {
     const id = recordId(rec);
     if (!id || peopleMap.has(id)) return;
+    const emails = recordEmails(rec);
+    // Attio often has nameless "stub" people (enriched from an email only). Recover
+    // a display name from the email rather than showing "Unknown"; skip only if
+    // there's neither a name nor an email to go on.
+    const name = recordName(rec) || nameFromEmail(emails[0]);
+    if (!name) return;
     peopleMap.set(id, {
-      name: recordName(rec) || "Unknown",
+      name,
       recordId: id,
-      emails: recordEmails(rec),
+      emails,
       linkedin: textVal(rec.values?.linkedin),
       jobTitle: selectVal(rec.values?.job_title) || textVal(rec.values?.job_title) || roleFallback,
     });
@@ -367,6 +422,27 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
   for (const p of plausiblePeople) addPerson(p);
 
   const people = [...peopleMap.values()];
+
+  // Enrich people using the deal_flow CEO/CTO LinkedIn URLs: assign the role and,
+  // when the slug is splittable (e.g. "natalie-curnes"), upgrade the display name.
+  // This is what turns a nameless "rooshil@…" stub into "Rooshil — CEO".
+  const ceoSlug = linkedinSlug(dealFlow?.ceoLinkedin);
+  const ctoSlug = linkedinSlug(dealFlow?.ctoLinkedin);
+  let ceoPersonName: string | undefined;
+  for (const p of people) {
+    const nameLooksDerived = /^[A-Z][a-z]+$/.test(p.name); // single word from an email
+    if (ceoSlug && personMatchesSlug(p.emails, p.name, ceoSlug)) {
+      p.jobTitle = p.jobTitle || "CEO";
+      if (nameLooksDerived) p.name = nameFromSlug(ceoSlug) || p.name;
+      p.linkedin = p.linkedin || dealFlow?.ceoLinkedin;
+      ceoPersonName = p.name;
+    } else if (ctoSlug && personMatchesSlug(p.emails, p.name, ctoSlug)) {
+      p.jobTitle = p.jobTitle || "CTO";
+      if (nameLooksDerived) p.name = nameFromSlug(ctoSlug) || p.name;
+      p.linkedin = p.linkedin || dealFlow?.ctoLinkedin;
+    }
+  }
+
   const emails = [...new Set(people.flatMap((p) => p.emails))];
 
   // Notes on the featured company + each real person record.
@@ -385,9 +461,10 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
   const featuredStealth =
     isStealthName(featuredRawName) || recordDomains(featured).length === 0;
 
-  // Founder display name: a real person if we have one; otherwise, for a stealth
-  // deal whose company record is named for the founder, the cleaned company name.
-  let founderName: string | undefined = people[0]?.name;
+  // Founder display name: the CEO if we identified one, else the first real
+  // person; otherwise, for a stealth deal whose company record is named for the
+  // founder, the cleaned company name.
+  let founderName: string | undefined = ceoPersonName || people[0]?.name;
   if (!founderName && featuredStealth && looksLikePersonName(featuredRawName)) {
     founderName = featuredRawName.replace(/\(.*?\)/g, "").trim();
   }

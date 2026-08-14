@@ -58,6 +58,16 @@ function mergePeople(attio: AttioResolution, grain: GrainResolution): Person[] {
     if (dup) {
       if (gp.email && !dup.emails.includes(gp.email)) dup.emails.push(gp.email);
       if (!dup.sources.includes("grain")) dup.sources.push("grain");
+      // Upgrade an email-derived name ("Rooshil") to Grain's fuller one
+      // ("Rooshil Shah") when it clearly extends the same name.
+      const dupTokens = normalize(dup.name).split(" ").filter(Boolean);
+      const gpTokens = normalize(gp.name).split(" ").filter(Boolean);
+      if (
+        gpTokens.length > dupTokens.length &&
+        dupTokens.every((t) => gpTokens.includes(t))
+      ) {
+        dup.name = gp.name;
+      }
     } else {
       // Don't presume a title — they were external participants in a recorded
       // meeting; the [grain] tag says where they came from.
