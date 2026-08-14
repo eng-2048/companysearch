@@ -1,27 +1,21 @@
 import { NextRequest } from "next/server";
-import { MOCK_BUNDLE } from "@/lib/mockData";
 import { SearchEvent } from "@/lib/types";
+import { gatherContext } from "@/lib/gather";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Phase 0: this endpoint streams a mock Context Bundle with realistic progress
-// lines. In Phase 1 the body of `gather()` is replaced with a live Claude Agent
-// SDK run that loads the company-search SKILL.md and reaches Attio / Grain /
-// Calendar over MCP — the streaming contract to the UI stays identical.
+// Streams a Context Bundle as NDJSON (one JSON event per line).
+// Phase 1: real Attio data. Grain / Calendar / email are added in later phases;
+// the streaming contract to the UI stays identical.
 
-function encoder() {
-  const enc = new TextEncoder();
-  return (evt: SearchEvent) => enc.encode(JSON.stringify(evt) + "\n");
+function line(evt: SearchEvent): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(evt) + "\n");
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function POST(req: NextRequest) {
   const { query } = await req.json().catch(() => ({ query: "" }));
   const name = String(query ?? "").trim();
-
-  const line = encoder();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -34,25 +28,24 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      // Mirror the skill's two-phase execution model as progress lines.
-      const steps = [
-        "Resolving the entity in Attio (companies + people)…",
-        "Pulling the deal_flow list entry and email set…",
-        "Fanning out: Calendar, Grain, email, Attio notes…",
-        "Reconciling into one timeline…",
-      ];
-      for (const s of steps) {
-        send({ type: "status", message: s });
-        await sleep(650);
-      }
+      try {
+        send({ type: "status", message: "Resolving the entity in Attio (companies + people)…" });
+        send({ type: "status", message: "Collecting record IDs, emails, and the deal_flow entry…" });
 
-      // In Phase 0 we always return the same mock, but echo the query so it's
-      // clear the input flowed through.
-      const bundle = { ...MOCK_BUNDLE };
-      send({ type: "status", message: "Bundle assembled." });
-      send({ type: "bundle", bundle });
-      send({ type: "done" });
-      controller.close();
+        const bundle = await gatherContext(name);
+
+        send({ type: "status", message: "Bundle assembled." });
+        send({ type: "bundle", bundle });
+        send({ type: "done" });
+      } catch (err: any) {
+        send({
+          type: "error",
+          message: err?.message ?? "Failed to gather context from Attio.",
+        });
+        send({ type: "done" });
+      } finally {
+        controller.close();
+      }
     },
   });
 

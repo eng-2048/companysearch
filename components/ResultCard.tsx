@@ -48,7 +48,7 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
           <div>
             <h2>
               {b.company}
-              {b.founder && b.founder !== b.company ? ` · ${b.founder}` : ""}
+              {b.founder && !b.company.includes(b.founder) ? ` · ${b.founder}` : ""}
             </h2>
             <div className="meta">
               Generated {b.generated} · Sources: {b.sourcesChecked.join(" · ")}
