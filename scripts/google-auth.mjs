@@ -14,9 +14,11 @@
 import http from "node:http";
 import https from "node:https";
 import { readFileSync, writeFileSync } from "node:fs";
-import { URL, URLSearchParams } from "node:url";
+import { URL, URLSearchParams, fileURLToPath } from "node:url";
 
-const ENV_PATH = new URL("../.env.local", import.meta.url).pathname;
+// fileURLToPath (not .pathname) so a space in the path — "2048 Software" — isn't
+// left as %20, which would break the file read.
+const ENV_PATH = fileURLToPath(new URL("../.env.local", import.meta.url));
 const REDIRECT = "http://localhost:5555/oauth2callback";
 const SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 

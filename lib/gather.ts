@@ -151,7 +151,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   const people = mergePeople(attio, grain);
   const allEmails = [...new Set(people.flatMap((p) => p.emails))];
 
-  const founder =
+  let founder =
     attio.founderName || grain.externalPeople[0]?.name || people[0]?.name || c?.name || query;
   const company = c?.name || query;
   const domain = c?.domain || inferDomain(allEmails);
@@ -254,6 +254,42 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     (!!d?.status && !/^(new|inbound|to review|n\/a)$/i.test(d.status))
       ? "past"
       : "upcoming";
+
+  // Upgrade person + founder names from calendar attendee display names — the
+  // calendar often carries the full name ("Rooshil Shah") where Attio had none.
+  const calNameByEmail = new Map<string, string>();
+  for (const ev of calendar.events) {
+    for (const a of ev.attendees) {
+      if (a.email && a.name) {
+        const e = a.email.toLowerCase();
+        const cur = calNameByEmail.get(e);
+        if (!cur || a.name.split(/\s+/).length > cur.split(/\s+/).length) {
+          calNameByEmail.set(e, a.name);
+        }
+      }
+    }
+  }
+  for (const p of people) {
+    const cn = p.emails.map((e) => calNameByEmail.get(e.toLowerCase())).find(Boolean);
+    if (!cn) continue;
+    const pT = normalize(p.name).split(" ").filter(Boolean);
+    const cT = normalize(cn).split(" ").filter(Boolean);
+    if (cT.length > pT.length && pT.every((t) => cT.includes(t))) {
+      p.name = cn;
+      if (!p.sources.includes("cal")) p.sources.push("cal");
+    }
+  }
+  const ceoName = people.find((p) => (p.role || "").toUpperCase() === "CEO")?.name;
+  if (ceoName) {
+    founder = ceoName;
+  } else {
+    const fT = normalize(founder).split(" ").filter(Boolean);
+    const fp = people.find((p) => {
+      const pT = normalize(p.name).split(" ").filter(Boolean);
+      return fT.length && pT.length >= fT.length && fT.every((t) => pT.includes(t));
+    });
+    if (fp) founder = fp.name;
+  }
 
   const introSource: Sourced | undefined =
     d?.introDByName || d?.introDByType

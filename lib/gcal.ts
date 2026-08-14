@@ -83,8 +83,29 @@ async function accessToken(): Promise<string> {
   return cachedToken.token;
 }
 
-async function listEvents(query: string, timeMin: string, timeMax: string): Promise<any[]> {
-  const token = await accessToken();
+/** Calendars the token can read events from (skip free/busy-only calendars). */
+async function listCalendars(token: string): Promise<string[]> {
+  const res = await fetch(`${CAL_BASE}/users/me/calendarList`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return ["primary"];
+  const json = await res.json();
+  const ids = (json.items || [])
+    .filter((c: any) => ["owner", "writer", "reader"].includes(c.accessRole))
+    // holiday/birthday calendars never hold deal meetings and just add calls
+    .filter((c: any) => !/holiday|birthday/i.test(c.id || ""))
+    .map((c: any) => c.id);
+  return ids.length ? ids : ["primary"];
+}
+
+async function listEvents(
+  calendarId: string,
+  query: string,
+  timeMin: string,
+  timeMax: string,
+  token: string
+): Promise<any[]> {
   const params = new URLSearchParams({
     q: query,
     timeMin,
@@ -93,16 +114,17 @@ async function listEvents(query: string, timeMin: string, timeMax: string): Prom
     orderBy: "startTime",
     maxResults: "25",
   });
-  const res = await fetch(`${CAL_BASE}/calendars/primary/events?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`Calendar list failed: HTTP ${res.status} ${await res.text().catch(() => "")}`);
-  }
+  const res = await fetch(
+    `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
+  );
+  if (!res.ok) return []; // a single calendar failing shouldn't sink the whole search
   const json = await res.json();
   return json.items || [];
 }
+
+const isGrainBotEvent = (raw: any): boolean =>
+  /^grain data for/i.test(raw.summary || "");
 
 function parseEvent(raw: any, nowMs: number): GCalEvent {
   const startISO = raw.start?.dateTime || raw.start?.date || "";
@@ -137,6 +159,7 @@ export async function resolveCalendar(
 ): Promise<CalendarResolution> {
   if (!calendarConfigured()) return { events: [], configured: false };
 
+  const token = await accessToken();
   const now = new Date();
   const nowMs = now.getTime();
   const timeMin = new Date(nowMs - PAST_WINDOW_DAYS * 864e5).toISOString();
@@ -145,21 +168,40 @@ export async function resolveCalendar(
   const queries = [...new Set([...emails, ...terms].map((s) => s.trim()).filter(Boolean))];
   const emailSet = new Set(emails.map((e) => e.toLowerCase()));
 
-  const lists = await Promise.all(
-    queries.map((q) => listEvents(q, timeMin, timeMax).catch(() => []))
-  );
+  // Search every accessible calendar (2048 shares team calendars — a meeting a
+  // colleague took with the founder is still firm context), all queries in parallel.
+  const calendars = await listCalendars(token);
+  const pairs = calendars.flatMap((cal) => queries.map((q) => ({ cal, q })));
+  const lists = await Promise.all(pairs.map((p) => listEvents(p.cal, p.q, timeMin, timeMax, token)));
 
-  const byId = new Map<string, any>();
-  for (const list of lists) for (const ev of list) if (ev?.id) byId.set(ev.id, ev);
+  // Dedupe the same meeting across calendars (each calendar holds its own copy;
+  // they share an iCalUID).
+  const byKey = new Map<string, any>();
+  for (const list of lists) {
+    for (const ev of list) {
+      const kkey = ev.iCalUID || `${ev.start?.dateTime || ev.start?.date}|${ev.summary}`;
+      if (!byKey.has(kkey)) byKey.set(kkey, ev);
+    }
+  }
+
+  // A deal meeting is ABOUT the founder — a small meeting. Big internal group
+  // events (e.g. "2048 Fellows: Deal Discuss") merely have the founder's email in
+  // a long attendee list; those must name the company/founder in the title to count.
+  const SMALL_MEETING = 10;
 
   const events: GCalEvent[] = [];
-  for (const raw of byId.values()) {
-    const attendeeEmails: string[] = (raw.attendees || [])
+  for (const raw of byKey.values()) {
+    if (isGrainBotEvent(raw)) continue;
+    const attendees = raw.attendees || [];
+    const attendeeEmails: string[] = attendees
       .map((a: any) => (a.email || "").toLowerCase())
       .filter(Boolean);
     const emailMatch = attendeeEmails.some((e: string) => emailSet.has(e));
     const titleMatch = terms.some((t) => wholeWordMatch(raw.summary || "", t));
-    if (emailMatch || titleMatch) events.push(parseEvent(raw, nowMs));
+    const keep =
+      (titleMatch && attendees.length > 0) ||
+      (emailMatch && attendees.length <= SMALL_MEETING);
+    if (keep) events.push(parseEvent(raw, nowMs));
   }
 
   events.sort((a, b) => a.startISO.localeCompare(b.startISO));
