@@ -84,6 +84,11 @@ function lastInteractionAt(rec: any): string | undefined {
   return li?.interacted_at || undefined;
 }
 
+/** Attio mirrors the connected Google calendar as aggregate interaction timestamps. */
+function calInteractionAt(rec: any, field: string): string | undefined {
+  return first(rec?.values?.[field])?.interacted_at || undefined;
+}
+
 // ---------- API primitives ----------
 
 async function searchRecords(object: string, term: string, limit = 25): Promise<any[]> {
@@ -194,6 +199,9 @@ export interface AttioResolution {
   dealFlow?: DealFlow;
   notes: AttioNote[];
   lastInteractionAt?: string;
+  /** From Attio's calendar mirror — a real upcoming meeting date (prep signal). */
+  nextMeetingAt?: string;
+  lastMeetingAt?: string;
   candidatesConsidered: number;
 }
 
@@ -503,6 +511,8 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     dealFlow,
     notes,
     lastInteractionAt: lastInteractionAt(featured),
+    nextMeetingAt: calInteractionAt(featured, "next_calendar_interaction"),
+    lastMeetingAt: calInteractionAt(featured, "last_calendar_interaction"),
     candidatesConsidered: candidateCompanies.length,
   };
 }

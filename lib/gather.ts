@@ -189,6 +189,25 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       sources: ["attio"],
     });
   }
+  // Calendar signals from Attio's mirror (full event list arrives with Google Calendar).
+  const todayStr = today();
+  const nextMeetingDay = attio.nextMeetingAt?.slice(0, 10);
+  if (nextMeetingDay && nextMeetingDay >= todayStr) {
+    timeline.push({
+      date: nextMeetingDay,
+      type: "upcoming",
+      summary: "Upcoming meeting on the calendar",
+      sources: ["cal"],
+    });
+  }
+  if (attio.lastMeetingAt && grain.recordings.length === 0) {
+    timeline.push({
+      date: attio.lastMeetingAt.slice(0, 10),
+      type: "meeting",
+      summary: "Most recent calendar meeting",
+      sources: ["cal"],
+    });
+  }
   timeline.sort((a, b) => b.date.localeCompare(a.date));
 
   const regime: ContextBundle["regime"] =
@@ -219,6 +238,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   else if (d?.capitalRaised) sp.push(`Raised ${d.capitalRaised}.`);
   if (grain.recordings.length)
     sp.push(`${grain.recordings.length} Grain recording${grain.recordings.length > 1 ? "s" : ""} on file.`);
+  if (nextMeetingDay && nextMeetingDay >= todayStr) sp.push(`Next meeting: ${nextMeetingDay}.`);
   if (d?.nextSteps) sp.push(`Next steps: ${d.nextSteps}.`);
   const summary = sp.join(" ");
 
