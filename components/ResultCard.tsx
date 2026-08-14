@@ -172,30 +172,55 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
             </div>
 
             {/* Meetings */}
-            {b.meetings.length > 0 && (
-              <div className="section">
-                <h3>Meetings</h3>
-                {b.meetings.map((m, i) => (
-                  <div className="row" key={i}>
-                    <span className="when">{m.datetime}</span>
-                    <span className="what">
-                      "{m.title}" — {m.attendees.map((a) => a.name || a.email).join(", ")}
-                      {m.recordingUrl ? (
-                        <>
-                          {" · "}
-                          <a href={m.recordingUrl} target="_blank" rel="noreferrer">
-                            recording ↗
-                          </a>
-                        </>
-                      ) : (
-                        " · no recording"
-                      )}
-                      <Tags sources={m.sources} />
-                    </span>
+            {b.meetings.length > 0 &&
+              (() => {
+                const isUpcoming = (m: (typeof b.meetings)[number]) =>
+                  m.datetime.slice(0, 10) > b.generated;
+                const upcoming = b.meetings
+                  .filter(isUpcoming)
+                  .sort((a, x) => a.datetime.localeCompare(x.datetime));
+                const past = b.meetings
+                  .filter((m) => !isUpcoming(m))
+                  .sort((a, x) => x.datetime.localeCompare(a.datetime));
+                const rsvpLabel = (s?: string) =>
+                  !s || s === "accepted"
+                    ? ""
+                    : ` (${s === "needsAction" ? "no reply" : s})`;
+                return (
+                  <div className="section">
+                    <h3>Meetings</h3>
+                    {[...upcoming, ...past].map((m, i) => (
+                      <div className="row" key={i}>
+                        <span className="when">
+                          {isUpcoming(m) && <span className="pill-up">soon</span>}
+                          {m.datetime}
+                        </span>
+                        <span className="what">
+                          "{m.title}"
+                          {m.recordingUrl && (
+                            <>
+                              {" · "}
+                              <a href={m.recordingUrl} target="_blank" rel="noreferrer">
+                                recording ↗
+                              </a>
+                            </>
+                          )}
+                          <Tags sources={m.sources} />
+                          <div className="attendees">
+                            {m.attendees.map((a, j) => (
+                              <span key={j} className={a.rsvp === "declined" ? "att declined" : "att"}>
+                                {a.name || a.email}
+                                {rsvpLabel(a.rsvp)}
+                                {j < m.attendees.length - 1 ? ", " : ""}
+                              </span>
+                            ))}
+                          </div>
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })()}
 
             {/* Grain */}
             {b.grainRecordings.length > 0 && (
