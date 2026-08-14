@@ -142,6 +142,12 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       resolution: `Searched ${r.candidatesConsidered} company record(s)`,
     });
   }
+  if (r.people.length === 0) {
+    gaps.push({
+      description: "Founder not identifiable from Attio's structured data (no linked person record)",
+      resolution: "Likely resolvable from the email thread, Grain, or the deck once those are connected",
+    });
+  }
 
   return {
     company: c.name,

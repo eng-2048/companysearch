@@ -216,9 +216,23 @@ function noteBodyExtract(n: any): string {
   return s.length > 400 ? s.slice(0, 400) + "…" : s;
 }
 
-/** Step 1 of the skill, as deterministic API calls. */
+
+const normName = (s: string): string =>
+  s.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * Step 1 of the skill, as deterministic API calls.
+ *
+ * Resolution is anchored to a COMPANY, never to a name-substring match. Searching
+ * Attio by the raw query term also returns coincidental hits (searching "verno"
+ * matches people named "Vernon" and the company "Governors Island"), so people
+ * are only ever attached to the resolved company via a real link — a team edge,
+ * a person->company link, or, for a founder-name query, a full-name match.
+ */
 export async function resolveEntity(query: string): Promise<AttioResolution> {
   const term = cleanTerm(query) || query.trim();
+  const queryIsPerson = looksLikePersonName(query);
+  const qn = normName(term);
 
   // Fire company + people searches together.
   const [companyHits, peopleHits] = await Promise.all([
@@ -226,70 +240,60 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     searchRecords(PEOPLE_OBJECT, term),
   ]);
 
-  // People: collect emails + linked company ids.
-  const people: ResolvedPerson[] = peopleHits.map((p) => ({
-    name: recordName(p) || "Unknown",
-    recordId: recordId(p),
-    emails: recordEmails(p),
-    linkedin: textVal(p.values?.linkedin),
-    jobTitle: selectVal(p.values?.job_title) || textVal(p.values?.job_title),
-  }));
+  // People are only "plausibly the founder" when the query itself is a person
+  // name AND the record's full name actually contains it — this is what keeps
+  // "verno" from matching "Vernon Gair".
+  const plausiblePeople = queryIsPerson
+    ? peopleHits.filter((p) => normName(recordName(p) || "").includes(qn))
+    : [];
 
-  const linkedCompanyIds = new Set<string>();
-  for (const p of peopleHits) {
-    const c = first(p.values?.company);
-    if (c?.target_record_id) linkedCompanyIds.add(c.target_record_id);
-  }
-
-  // Union candidate company records: direct hits + companies linked from people.
+  // Candidate companies: name-matched companies + companies linked from the
+  // plausible founder-people (NOT from every coincidental people hit).
   const companyById = new Map<string, any>();
   for (const c of companyHits) companyById.set(recordId(c), c);
-  const missingLinked = [...linkedCompanyIds].filter((id) => !companyById.has(id));
+  const linkedIds = new Set<string>();
+  for (const p of plausiblePeople) {
+    const cid = first(p.values?.company)?.target_record_id;
+    if (cid) linkedIds.add(cid);
+  }
+  const missingLinked = [...linkedIds].filter((id) => !companyById.has(id));
   const linkedFetched = await Promise.all(
     missingLinked.map((id) => getRecord(COMPANIES_OBJECT, id))
   );
   for (const c of linkedFetched) if (c) companyById.set(recordId(c), c);
-
   const candidateCompanies = [...companyById.values()];
 
-  // Pull team members from each candidate company to catch co-founders' emails.
-  const teamPersonIds = new Set<string>();
-  for (const c of candidateCompanies) {
-    const team = c.values?.team;
-    if (Array.isArray(team)) {
-      for (const t of team) if (t?.target_record_id) teamPersonIds.add(t.target_record_id);
-    }
-  }
-  const knownPersonIds = new Set(people.map((p) => p.recordId));
-  const missingTeam = [...teamPersonIds].filter((id) => !knownPersonIds.has(id));
-  const teamFetched = await Promise.all(
-    missingTeam.map((id) => getRecord(PEOPLE_OBJECT, id))
-  );
-  for (const p of teamFetched) {
-    if (!p) continue;
-    people.push({
-      name: recordName(p) || "Unknown",
-      recordId: recordId(p),
-      emails: recordEmails(p),
-      linkedin: textVal(p.values?.linkedin),
-      jobTitle: selectVal(p.values?.job_title) || textVal(p.values?.job_title),
-    });
+  if (candidateCompanies.length === 0) {
+    return {
+      found: false,
+      allCompanyRecordIds: [],
+      people: [],
+      emails: [],
+      notes: [],
+      candidatesConsidered: 0,
+    };
   }
 
-  const emails = [...new Set(people.flatMap((p) => p.emails))];
+  // How well a company's name matches the query — used to pick the right record
+  // when several match (e.g. the real "Verno" over "Governors Island").
+  const nameScore = (c: any): number => {
+    const n = normName(recordName(c) || "");
+    if (n === qn) return 3;
+    if (n.includes(qn) || qn.includes(n)) return 2;
+    return recordDomains(c).length ? 1 : 0;
+  };
 
-  // Find the deal_flow entry: walk every candidate company's list entries.
-  let dealEntryId: string | undefined;
-  let dealParentCompanyId: string | undefined;
+  // Find deal_flow entries among candidates; prefer the best name match.
+  const dealHits: { company: any; entryId: string }[] = [];
   for (const c of candidateCompanies) {
     const entries = await recordEntries(COMPANIES_OBJECT, recordId(c));
     const de = entries.find((e) => e.list_api_slug === DEAL_FLOW_SLUG);
-    if (de) {
-      dealEntryId = de.entry_id;
-      dealParentCompanyId = recordId(c);
-      break;
-    }
+    if (de) dealHits.push({ company: c, entryId: de.entry_id });
   }
+  dealHits.sort((a, b) => nameScore(b.company) - nameScore(a.company));
+
+  const dealEntryId = dealHits[0]?.entryId;
+  const dealParentCompanyId = dealHits[0] ? recordId(dealHits[0].company) : undefined;
 
   let dealFlow: DealFlow | undefined;
   if (dealEntryId) {
@@ -321,62 +325,77 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
       companyDomain: textVal(ev.company_domain),
       school: selectVal(ev.school),
     };
-
-    // Resolve the intro-source record reference to a name.
     if (dealFlow.introDById) {
       const rec = await getRecord(dealFlow.introDById.object, dealFlow.introDById.recordId);
       if (rec) dealFlow.introDByName = recordName(rec);
     }
   }
 
-  if (candidateCompanies.length === 0 && people.length === 0) {
-    return {
-      found: false,
-      allCompanyRecordIds: [],
-      people: [],
-      emails: [],
-      notes: [],
-      candidatesConsidered: 0,
-    };
-  }
-
-  // Pick the featured company: prefer the deal_flow parent, else a real-domain
-  // record, else the most recently interacted, else the first.
-  const withRealDomain = candidateCompanies.filter((c) => recordDomains(c).length > 0);
+  // Featured company: the deal_flow parent, else the best name match.
+  const byScore = [...candidateCompanies].sort((a, b) => nameScore(b) - nameScore(a));
   const featured =
-    candidateCompanies.find((c) => recordId(c) === dealParentCompanyId) ||
-    withRealDomain[0] ||
-    candidateCompanies[0];
+    candidateCompanies.find((c) => recordId(c) === dealParentCompanyId) || byScore[0];
+  const featuredId = recordId(featured);
 
-  // Notes on the featured company + each real person record (before we add any
-  // synthetic founder, which has no record to query notes on).
-  const noteSources: { object: string; id: string }[] = [];
-  if (featured) noteSources.push({ object: COMPANIES_OBJECT, id: recordId(featured) });
-  for (const p of people) noteSources.push({ object: PEOPLE_OBJECT, id: p.recordId });
-  const noteResults = await Promise.all(
-    noteSources.map((s) => getNotes(s.object, s.id))
-  );
+  // People, anchored to the featured company only:
+  //  (a) the featured company's team links,
+  //  (b) people from the name search whose linked company IS the featured company,
+  //  (c) the plausible founder-people themselves (founder-name query).
+  const peopleMap = new Map<string, ResolvedPerson>();
+  const addPerson = (rec: any, roleFallback?: string) => {
+    const id = recordId(rec);
+    if (!id || peopleMap.has(id)) return;
+    peopleMap.set(id, {
+      name: recordName(rec) || "Unknown",
+      recordId: id,
+      emails: recordEmails(rec),
+      linkedin: textVal(rec.values?.linkedin),
+      jobTitle: selectVal(rec.values?.job_title) || textVal(rec.values?.job_title) || roleFallback,
+    });
+  };
+
+  const teamIds = new Set<string>();
+  for (const t of featured.values?.team || []) {
+    if (t?.target_record_id) teamIds.add(t.target_record_id);
+  }
+  const teamRecs = await Promise.all([...teamIds].map((id) => getRecord(PEOPLE_OBJECT, id)));
+  for (const r of teamRecs) if (r) addPerson(r);
+
+  for (const p of peopleHits) {
+    if (first(p.values?.company)?.target_record_id === featuredId) addPerson(p);
+  }
+  for (const p of plausiblePeople) addPerson(p);
+
+  const people = [...peopleMap.values()];
+  const emails = [...new Set(people.flatMap((p) => p.emails))];
+
+  // Notes on the featured company + each real person record.
+  const noteSources: { object: string; id: string }[] = [
+    { object: COMPANIES_OBJECT, id: featuredId },
+    ...people.map((p) => ({ object: PEOPLE_OBJECT, id: p.recordId })),
+  ];
+  const noteResults = await Promise.all(noteSources.map((s) => getNotes(s.object, s.id)));
   const notes: AttioNote[] = noteResults.flat().map((n) => ({
     title: n.title || "(untitled note)",
     date: n.created_at,
     extract: noteBodyExtract(n),
   }));
 
-  const featuredRawName = featured ? recordName(featured) || term : term;
+  const featuredRawName = recordName(featured) || term;
   const featuredStealth =
-    !!featured && (isStealthName(featuredRawName) || recordDomains(featured).length === 0);
+    isStealthName(featuredRawName) || recordDomains(featured).length === 0;
 
-  // Determine the founder's display name. Prefer a real person; otherwise, for a
-  // stealth deal the founder IS the company record's name (minus "(Stealth)").
+  // Founder display name: a real person if we have one; otherwise, for a stealth
+  // deal whose company record is named for the founder, the cleaned company name.
   let founderName: string | undefined = people[0]?.name;
-  if (!founderName && featured && looksLikePersonName(featuredRawName)) {
+  if (!founderName && featuredStealth && looksLikePersonName(featuredRawName)) {
     founderName = featuredRawName.replace(/\(.*?\)/g, "").trim();
   }
 
-  // If no person record exists but we recovered a founder name, synthesize one so
-  // the founder still surfaces (with their CEO LinkedIn from the deal_flow entry).
+  // Synthesize a founder ONLY for the stealth-named-by-founder case — never for a
+  // real company that simply has no linked person record.
   const displayPeople = [...people];
-  if (displayPeople.length === 0 && founderName) {
+  if (displayPeople.length === 0 && founderName && featuredStealth) {
     displayPeople.push({
       name: founderName,
       recordId: "",
@@ -388,31 +407,25 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
 
   return {
     found: true,
-    featuredCompany: featured
-      ? {
-          name: featuredRawName,
-          recordId: recordId(featured),
-          domain: recordDomains(featured)[0],
-          description: textVal(featured.values?.description),
-          location:
-            dealFlow?.location ||
-            first(featured.values?.primary_location)?.locality ||
-            undefined,
-          founded:
-            dealFlow?.dateFounded ||
-            dateVal(featured.values?.foundation_date) ||
-            undefined,
-          fundingRaised: currencyVal(featured.values?.funding_raised_usd),
-          isStealth: featuredStealth,
-        }
-      : undefined,
+    featuredCompany: {
+      name: featuredRawName,
+      recordId: featuredId,
+      domain: recordDomains(featured)[0],
+      description: textVal(featured.values?.description),
+      location:
+        dealFlow?.location || first(featured.values?.primary_location)?.locality || undefined,
+      founded:
+        dealFlow?.dateFounded || dateVal(featured.values?.foundation_date) || undefined,
+      fundingRaised: currencyVal(featured.values?.funding_raised_usd),
+      isStealth: featuredStealth,
+    },
     founderName,
     allCompanyRecordIds: candidateCompanies.map((c) => recordId(c)),
     people: displayPeople,
     emails,
     dealFlow,
     notes,
-    lastInteractionAt: featured ? lastInteractionAt(featured) : undefined,
+    lastInteractionAt: lastInteractionAt(featured),
     candidatesConsidered: candidateCompanies.length,
   };
 }
