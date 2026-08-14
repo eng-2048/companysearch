@@ -152,14 +152,19 @@ const isGrainBotEvent = (raw: any): boolean =>
 
 function parseEvent(raw: any, nowMs: number): GCalEvent {
   const startISO = raw.start?.dateTime || raw.start?.date || "";
-  const startMs = startISO ? new Date(startISO).getTime() : 0;
+  const allDay = !raw.start?.dateTime;
+  // Timed events: compare the actual start time to now (a 9am meeting is "past"
+  // by the afternoon). All-day events: compare by date.
+  const upcoming = allDay
+    ? startISO >= new Date(nowMs).toISOString().slice(0, 10)
+    : new Date(startISO).getTime() > nowMs;
   return {
     id: raw.id,
     title: raw.summary || "(no title)",
     startISO,
     endISO: raw.end?.dateTime || raw.end?.date,
-    allDay: !raw.start?.dateTime,
-    upcoming: startMs > nowMs,
+    allDay,
+    upcoming,
     attendees: (raw.attendees || []).map((a: any) => ({
       name: a.displayName || undefined,
       email: a.email || undefined,

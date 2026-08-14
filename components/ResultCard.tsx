@@ -174,8 +174,7 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
             {/* Meetings */}
             {b.meetings.length > 0 &&
               (() => {
-                const isUpcoming = (m: (typeof b.meetings)[number]) =>
-                  m.datetime.slice(0, 10) > b.generated;
+                const isUpcoming = (m: (typeof b.meetings)[number]) => !!m.upcoming;
                 const upcoming = b.meetings
                   .filter(isUpcoming)
                   .sort((a, x) => a.datetime.localeCompare(x.datetime));

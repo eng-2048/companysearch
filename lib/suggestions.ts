@@ -78,7 +78,6 @@ export async function getMeetingSuggestions(
     listPrimaryWindow(daysBack, daysForward),
     internalNameTokens(),
   ]);
-  const todayStr = new Date().toISOString().slice(0, 10);
   const best = new Map<string, MeetingSuggestion>();
 
   for (const ev of events) {
@@ -104,13 +103,13 @@ export async function getMeetingSuggestions(
     const key = normalize(term);
     if (!key) continue;
 
-    const day = ev.startISO.slice(0, 10);
     const sug: MeetingSuggestion = {
       term,
       title: ev.title,
-      date: day,
+      date: ev.startISO.slice(0, 10),
       time: ev.allDay ? undefined : ev.startISO.slice(11, 16),
-      upcoming: day >= todayStr,
+      // time-based: a meeting earlier today is already past
+      upcoming: ev.upcoming,
     };
 
     // One entry per company: prefer an upcoming meeting (soonest); else the most recent.
@@ -120,7 +119,7 @@ export async function getMeetingSuggestions(
     } else if (sug.upcoming && !prev.upcoming) {
       best.set(key, sug);
     } else if (sug.upcoming === prev.upcoming) {
-      const better = sug.upcoming ? sug.date < prev.date : sug.date > prev.date;
+      const better = sug.upcoming ? dtKey(sug) < dtKey(prev) : dtKey(sug) > dtKey(prev);
       if (better) best.set(key, sug);
     }
   }
@@ -128,7 +127,10 @@ export async function getMeetingSuggestions(
   const all = [...best.values()];
   return {
     configured: true,
-    upcoming: all.filter((s) => s.upcoming).sort((a, b) => a.date.localeCompare(b.date)),
-    recent: all.filter((s) => !s.upcoming).sort((a, b) => b.date.localeCompare(a.date)),
+    upcoming: all.filter((s) => s.upcoming).sort((a, b) => dtKey(a).localeCompare(dtKey(b))),
+    recent: all.filter((s) => !s.upcoming).sort((a, b) => dtKey(b).localeCompare(dtKey(a))),
   };
 }
+
+/** Sort key combining date + time (past meetings today sort by time, too). */
+const dtKey = (s: MeetingSuggestion) => `${s.date} ${s.time || "00:00"}`;

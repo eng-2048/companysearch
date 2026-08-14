@@ -176,6 +176,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     title: r.title,
     attendees: r.participants.map((p) => ({ name: p.name, email: p.email })),
     recordingUrl: r.url,
+    upcoming: false, // a recorded meeting already happened
     sources: ["grain"],
   }));
   for (const ev of calendar.events) {
@@ -203,6 +204,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
         title: ev.title,
         attendees,
         recordingUrl: undefined,
+        upcoming: ev.upcoming,
         sources: ["cal"],
       });
     }
@@ -210,16 +212,12 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   meetings.sort((a, b) => a.datetime.localeCompare(b.datetime));
 
   // --- Timeline, derived from the reconciled meetings (+ Attio fallbacks) ---
-  const timeline: TimelineEntry[] = meetings.map((m) => {
-    const day = m.datetime.slice(0, 10);
-    const upcoming = day > todayStr && !m.recordingUrl;
-    return {
-      date: day,
-      type: upcoming ? "upcoming" : "meeting",
-      summary: `${upcoming ? "Upcoming meeting" : "Meeting"} — "${m.title}"`,
-      sources: m.sources,
-    };
-  });
+  const timeline: TimelineEntry[] = meetings.map((m) => ({
+    date: m.datetime.slice(0, 10),
+    type: m.upcoming ? "upcoming" : "meeting",
+    summary: `${m.upcoming ? "Upcoming meeting" : "Meeting"} — "${m.title}"`,
+    sources: m.sources,
+  }));
   // Fall back to Attio's aggregate calendar signal only when Google isn't giving events.
   if (!calendar.configured || calendar.events.length === 0) {
     const nextDay = attio.nextMeetingAt?.slice(0, 10);
@@ -238,7 +236,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   }
   timeline.sort((a, b) => b.date.localeCompare(a.date));
 
-  const upcomingMeetings = meetings.filter((m) => m.datetime.slice(0, 10) > todayStr);
+  const upcomingMeetings = meetings.filter((m) => m.upcoming);
   const nextMeetingDay =
     upcomingMeetings[0]?.datetime.slice(0, 10) ||
     (attio.nextMeetingAt && attio.nextMeetingAt.slice(0, 10) >= todayStr
@@ -246,7 +244,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       : undefined);
 
   const hasPast =
-    meetings.some((m) => m.datetime.slice(0, 10) <= todayStr) || grain.recordings.length > 0;
+    meetings.some((m) => !m.upcoming) || grain.recordings.length > 0;
   const regime: ContextBundle["regime"] =
     hasPast ||
     !!attio.lastInteractionAt ||
