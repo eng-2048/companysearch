@@ -116,6 +116,7 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
         <LinkChip label="Website" link={b.links.website} />
         <LinkChip label="Deal folder" link={b.links.dealFolder} />
         {b.regime === "past" && <LinkChip label="Recording" link={b.links.recording} />}
+        <LinkChip label="Attio Record" link={b.links.attioRecord} />
       </div>
 
       {/* ---- Expander ---- */}
@@ -169,6 +170,14 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
                           </a>
                         </>
                       )}
+                      {m.notesUrl && (
+                        <>
+                          {" · "}
+                          <a href={m.notesUrl} target="_blank" rel="noreferrer">
+                            Attio notes ↗
+                          </a>
+                        </>
+                      )}
                     </div>
                     {m.attendees.length > 0 && (
                       <div className="tl-detail">
@@ -216,20 +225,6 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
               </div>
             )}
 
-            {/* Attio notes */}
-            {b.attioNotes.length > 0 && (
-              <div className="section">
-                <h3>Attio notes</h3>
-                {b.attioNotes.map((n, i) => (
-                  <div className="row" key={i}>
-                    <span className="when">{n.date?.slice(0, 10)}</span>
-                    <span className="what">
-                      <b>{n.title}</b> — {n.extract}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>

@@ -177,6 +177,7 @@ export interface AttioNote {
   title: string;
   date?: string;
   extract: string;
+  noteId?: string;
 }
 
 export interface AttioResolution {
@@ -190,6 +191,7 @@ export interface AttioResolution {
     founded?: string;
     fundingRaised?: string;
     isStealth: boolean;
+    webUrl?: string;
   };
   /** The founder's display name (from a person record, or the stealth company name). */
   founderName?: string;
@@ -518,6 +520,7 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     title: n.title || "(untitled note)",
     date: n.created_at,
     extract: noteBodyExtract(n),
+    noteId: n.id?.note_id,
   }));
 
   const featuredRawName = recordName(featured) || term;
@@ -562,6 +565,7 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
         dealFlow?.dateFounded || dateVal(featured.values?.foundation_date) || undefined,
       fundingRaised: currencyVal(featured.values?.funding_raised_usd),
       isStealth: featuredStealth,
+      webUrl: featured.web_url,
     },
     founderName,
     allCompanyRecordIds: candidateCompanies.map((c) => recordId(c)),

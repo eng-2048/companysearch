@@ -216,6 +216,17 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   const startMs = (m: Meeting) => (m.startISO ? new Date(m.startISO).getTime() : 0);
   meetings.sort((a, b) => startMs(a) - startMs(b));
 
+  // Attach an Attio note to the meeting it belongs to (matched by date), and
+  // build a link to it. Attio doesn't return a note web_url, so construct one
+  // from the workspace base in the company record's web_url.
+  const workspaceBase = c?.webUrl ? c.webUrl.split("/company/")[0] : undefined;
+  for (const m of meetings) {
+    const day = m.startISO?.slice(0, 10);
+    if (!day) continue;
+    const note = attio.notes.find((n) => n.noteId && n.date?.slice(0, 10) === day);
+    if (note && workspaceBase) m.notesUrl = `${workspaceBase}/notes/${note.noteId}`;
+  }
+
   // --- Timeline, derived from the reconciled meetings (+ Attio fallbacks) ---
   const timeline: TimelineEntry[] = meetings.map((m) => ({
     date: m.datetime.slice(0, 10),
@@ -330,6 +341,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       d?.videoLink || d?.firstMeetingRecording
         ? sourced(d?.videoLink || d?.firstMeetingRecording, "attio")
         : sourced(grainRecUrl, "grain"),
+    attioRecord: sourced(c?.webUrl, "attio"),
   };
 
   // Gaps — honest about what's still not wired.

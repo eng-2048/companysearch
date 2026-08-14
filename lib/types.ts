@@ -35,6 +35,7 @@ export interface Links {
   ceoLinkedin?: Sourced;
   ctoLinkedin?: Sourced;
   recording?: Sourced; // video_link / demo / Loom / YouTube / Grain
+  attioRecord?: Sourced; // the company record in Attio
 }
 
 export interface Person {
@@ -62,7 +63,7 @@ export interface Meeting {
     rsvp?: string;
   }[];
   recordingUrl?: string; // Grain link, or undefined = "none"
-  notesRef?: string; // Attio note ref, or undefined
+  notesUrl?: string; // Attio note for this meeting (matched by date), or undefined
   upcoming?: boolean; // start is in the future (time-based, not just date)
   startISO?: string; // raw start timestamp, for chronological sorting
   sources: SourceTag[];
