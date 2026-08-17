@@ -108,15 +108,13 @@ export async function resolveEmail(emails: string[]): Promise<EmailResolution> {
 
   messages.sort((a, b) => a.date.localeCompare(b.date));
 
-  const founderSet = new Set(clean);
+  // Label a sender: "(2048)" for internal, the raw name otherwise.
+  const who = (m?: EmailMessage) =>
+    !m ? "" : `${m.fromName}${m.fromEmail?.endsWith("@2048.vc") ? " (2048)" : ""}`;
   const first = messages[0];
   const last = messages[messages.length - 1];
-  const intro = first
-    ? `${first.date} — ${first.fromName}${
-        first.fromEmail && !founderSet.has(first.fromEmail) ? " (external)" : ""
-      }: ${first.subject}`
-    : undefined;
-  const outcome = last ? `${last.date} — ${last.fromName}: ${last.subject}` : undefined;
+  const intro = first ? `${first.date} — ${who(first)}: ${first.subject}` : undefined;
+  const outcome = last ? `${last.date} — ${who(last)}: ${last.subject}` : undefined;
 
   return { configured: true, available: true, messages, intro, outcome };
 }
