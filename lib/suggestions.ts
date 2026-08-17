@@ -3,7 +3,13 @@
 // (primary), filtered to external deal meetings, with the company/founder
 // inferred from the meeting title (2048's titling conventions).
 
-import { listPrimaryWindow, calendarConfigured, internalNameTokens, GCalEvent } from "./gcal";
+import {
+  listPrimaryWindow,
+  calendarConfigured,
+  internalNameTokens,
+  resolveCalendar,
+  GCalEvent,
+} from "./gcal";
 import { normalize } from "./match";
 
 const INTERNAL_DOMAIN = "2048.vc";
@@ -119,6 +125,32 @@ function localDate(offset: number): string {
 }
 
 /** External deal meetings for the next `numDays` days (today first), grouped by date. */
+/**
+ * Company/founder search terms inferred from ALL of a person's calendar meetings.
+ * Lets us recover the company when one meeting's title is unhelpful (just a first
+ * name) by borrowing a richer title from another meeting with the same person —
+ * e.g. owesche@… also has "Zann // Oliver (Verno)" -> "Verno".
+ */
+export async function companyTermsForEmail(email: string): Promise<string[]> {
+  if (!calendarConfigured() || !email) return [];
+  const [{ events }, teamTokens] = await Promise.all([
+    resolveCalendar([], [email]),
+    internalNameTokens(),
+  ]);
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const dm = eventToDayMeeting(ev, teamTokens);
+    if (!dm) continue;
+    const key = normalize(dm.term);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      terms.push(dm.term);
+    }
+  }
+  return terms;
+}
+
 export async function getMultiDayMeetings(
   numDays = 3
 ): Promise<{ configured: boolean; days: { date: string; meetings: DayMeeting[] }[] }> {
