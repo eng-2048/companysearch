@@ -217,14 +217,21 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   meetings.sort((a, b) => startMs(a) - startMs(b));
 
   // Attach an Attio note to the meeting it belongs to (matched by date), and
-  // build a link to it. Attio doesn't return a note web_url, so construct one
-  // from the workspace base in the company record's web_url.
+  // build a deep-link that opens the note in its record's Notes tab. Attio
+  // doesn't return a note web_url, so construct one from the workspace base in
+  // the company record's web_url:
+  //   {workspace}/{company|person}/{parent_record_id}/notes?id={note_id}&modal=note
   const workspaceBase = c?.webUrl ? c.webUrl.split("/company/")[0] : undefined;
+  const noteUrl = (n: (typeof attio.notes)[number]): string | undefined => {
+    if (!workspaceBase || !n.noteId || !n.parentRecordId) return undefined;
+    const seg = n.parentObject === "people" ? "person" : "company";
+    return `${workspaceBase}/${seg}/${n.parentRecordId}/notes?id=${n.noteId}&modal=note`;
+  };
   for (const m of meetings) {
     const day = m.startISO?.slice(0, 10);
     if (!day) continue;
     const note = attio.notes.find((n) => n.noteId && n.date?.slice(0, 10) === day);
-    if (note && workspaceBase) m.notesUrl = `${workspaceBase}/notes/${note.noteId}`;
+    if (note) m.notesUrl = noteUrl(note);
   }
 
   // --- Timeline, derived from the reconciled meetings (+ Attio fallbacks) ---

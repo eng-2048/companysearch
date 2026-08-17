@@ -178,6 +178,8 @@ export interface AttioNote {
   date?: string;
   extract: string;
   noteId?: string;
+  parentObject?: string; // "companies" | "people"
+  parentRecordId?: string;
 }
 
 export interface AttioResolution {
@@ -521,6 +523,8 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     date: n.created_at,
     extract: noteBodyExtract(n),
     noteId: n.id?.note_id,
+    parentObject: n.parent_object,
+    parentRecordId: n.parent_record_id,
   }));
 
   const featuredRawName = recordName(featured) || term;
