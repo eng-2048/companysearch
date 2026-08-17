@@ -127,7 +127,10 @@ function notFound(query: string): ContextBundle {
   };
 }
 
-export async function gatherContext(query: string): Promise<ContextBundle> {
+export async function gatherContext(
+  query: string,
+  opts: { attioOnly?: boolean } = {}
+): Promise<ContextBundle> {
   const attio = await resolveEntity(query);
 
   // Build Grain search terms from whatever we now know.
@@ -138,12 +141,16 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   }
   terms.push(query.replace(/\(.*?\)/g, "").trim());
 
+  // Prep mode (attioOnly) skips the heavy Grain/Calendar/Email passes — it only
+  // needs identity + links, and runs once per meeting so speed matters.
   let grain: GrainResolution = { recordings: [], externalPeople: [], emails: [] };
   let grainError: string | undefined;
-  try {
-    grain = await resolveGrain(terms);
-  } catch (e: any) {
-    grainError = e?.message || "Grain lookup failed";
+  if (!opts.attioOnly) {
+    try {
+      grain = await resolveGrain(terms);
+    } catch (e: any) {
+      grainError = e?.message || "Grain lookup failed";
+    }
   }
 
   if (!attio.found && grain.recordings.length === 0) return notFound(query);
@@ -165,7 +172,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
   let calendar: CalendarResolution = { events: [], configured: calendarConfigured() };
   let calError: string | undefined;
   try {
-    calendar = await resolveCalendar(calTerms, allEmails);
+    if (!opts.attioOnly) calendar = await resolveCalendar(calTerms, allEmails);
   } catch (e: any) {
     calError = e?.message || "Calendar lookup failed";
   }
@@ -328,10 +335,12 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
 
   let email: EmailResolution = { configured: gmailConfigured(), available: false, messages: [] };
   let emailError: string | undefined;
-  try {
-    email = await resolveEmail([...emailSearchSet]);
-  } catch (e: any) {
-    emailError = e?.message || "Email lookup failed";
+  if (!opts.attioOnly) {
+    try {
+      email = await resolveEmail([...emailSearchSet]);
+    } catch (e: any) {
+      emailError = e?.message || "Email lookup failed";
+    }
   }
   const emailThread =
     email.messages.length > 0

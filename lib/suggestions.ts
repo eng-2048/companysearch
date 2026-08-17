@@ -68,6 +68,63 @@ function deriveTerm(title: string, internalNameTokens: Set<string>): string | un
   return candidates[0];
 }
 
+export interface DayMeeting {
+  term: string;
+  title: string;
+  startISO: string;
+  time?: string;
+  upcoming: boolean;
+  attendees: { name?: string; email?: string; rsvp?: string }[];
+}
+
+/** External deal meetings on a given day (default today) — the basis for meeting prep. */
+export async function getDayMeetings(
+  dateStr?: string
+): Promise<{ configured: boolean; date: string; meetings: DayMeeting[] }> {
+  const day = dateStr || new Date().toISOString().slice(0, 10);
+  if (!calendarConfigured()) return { configured: false, date: day, meetings: [] };
+
+  const [events, teamTokens] = await Promise.all([
+    listPrimaryWindow(1, 2),
+    internalNameTokens(),
+  ]);
+
+  const out: DayMeeting[] = [];
+  for (const ev of events) {
+    if (ev.startISO.slice(0, 10) !== day) continue;
+    if (/^grain data for/i.test(ev.title)) continue;
+    const attendees = ev.attendees || [];
+    if (attendees.length === 0 || attendees.length > 12) continue;
+
+    const internalTokens = new Set<string>(teamTokens);
+    let hasExternal = false;
+    for (const a of attendees) {
+      const dom = (a.email || "").split("@")[1]?.toLowerCase();
+      if (!dom) continue;
+      if (dom === INTERNAL_DOMAIN) {
+        if (a.name) for (const t of normalize(a.name).split(" ")) if (t.length > 2) internalTokens.add(t);
+      } else {
+        hasExternal = true;
+      }
+    }
+    if (!hasExternal) continue;
+
+    const term = deriveTerm(ev.title, internalTokens);
+    if (!term) continue;
+
+    out.push({
+      term,
+      title: ev.title,
+      startISO: ev.startISO,
+      time: ev.allDay ? undefined : ev.startISO.slice(11, 16),
+      upcoming: ev.upcoming,
+      attendees: attendees.map((a) => ({ name: a.name, email: a.email, rsvp: a.responseStatus })),
+    });
+  }
+  out.sort((a, b) => a.startISO.localeCompare(b.startISO));
+  return { configured: true, date: day, meetings: out };
+}
+
 export async function getMeetingSuggestions(
   daysBack = 7,
   daysForward = 7

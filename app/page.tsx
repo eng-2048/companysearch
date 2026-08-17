@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ContextBundle, SearchEvent } from "@/lib/types";
+import { ContextBundle, SearchEvent, PrepResult } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
+import MeetingPrep from "@/components/MeetingPrep";
 
 interface Suggestion {
   term: string;
@@ -37,8 +38,25 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [sugs, setSugs] = useState<Suggestions>({ configured: false, upcoming: [], recent: [] });
   const [open, setOpen] = useState(false);
+  const [prepMode, setPrepMode] = useState(false);
+  const [prepData, setPrepData] = useState<PrepResult | null>(null);
+  const [prepLoading, setPrepLoading] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  async function openPrep() {
+    setPrepMode(true);
+    setPrepLoading(true);
+    setPrepData(null);
+    try {
+      const res = await fetch("/api/meeting-prep");
+      setPrepData(await res.json());
+    } catch {
+      setPrepData({ configured: false, date: new Date().toISOString().slice(0, 10), meetings: [] });
+    } finally {
+      setPrepLoading(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/suggestions")
@@ -133,11 +151,18 @@ export default function Home() {
       <div className="masthead">
         <h1>Company Search</h1>
         <span className="brand">2048 Ventures</span>
+        <button className="prep-btn" onClick={openPrep}>
+          Meeting Prep
+        </button>
       </div>
       <p className="subtitle">
         Search a company or founder — or pick one of this week&apos;s meetings to prep.
       </p>
 
+      {prepMode ? (
+        <MeetingPrep data={prepData} loading={prepLoading} onClose={() => setPrepMode(false)} />
+      ) : (
+        <>
       <form
         className="searchbar"
         onSubmit={(e) => {
@@ -193,6 +218,8 @@ export default function Home() {
 
       {error && <div className="error-box">⚠ {error}</div>}
       {bundle && <ResultCard bundle={bundle} />}
+        </>
+      )}
     </div>
   );
 }

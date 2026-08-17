@@ -122,6 +122,35 @@ export interface ContextBundle {
   gaps: Gap[];
 }
 
+// ---- Meeting prep (today's meetings primer) ----
+export interface PrepLinks {
+  deck?: string;
+  ceoLinkedin?: string;
+  ctoLinkedin?: string;
+  website?: string;
+  dealFolder?: string;
+  attioRecord?: string;
+  recording?: string;
+}
+
+export interface PrepEntry {
+  time?: string; // HH:MM (24h; formatted client-side)
+  upcoming: boolean;
+  title: string;
+  attendees: { name?: string; email?: string; rsvp?: string }[];
+  company: string;
+  founder: string;
+  status?: string;
+  description?: string;
+  links: PrepLinks;
+}
+
+export interface PrepResult {
+  configured: boolean;
+  date: string;
+  meetings: PrepEntry[];
+}
+
 /** Streaming protocol between backend and UI. */
 export type SearchEvent =
   | { type: "status"; message: string } // progress line, e.g. "Resolving in Attio…"
