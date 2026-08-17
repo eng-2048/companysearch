@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { to12h } from "@/lib/match";
 
@@ -25,7 +26,64 @@ const LINK_LABELS: [keyof PrepLinks, string][] = [
   ["attioRecord", "Attio Record"],
 ];
 
-function PrepCard({ m }: { m: PrepEntry }) {
+/** Editable pipeline status — writes the change back to Attio on select. */
+function StatusSelect({
+  entryId,
+  status,
+  options,
+}: {
+  entryId: string;
+  status: string;
+  options: string[];
+}) {
+  const [value, setValue] = useState(status);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function change(next: string) {
+    if (next === value) return;
+    const prev = value;
+    setValue(next);
+    setState("saving");
+    try {
+      const res = await fetch("/api/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId, status: next }),
+      });
+      const j = await res.json();
+      if (!j.ok) throw new Error();
+      setState("saved");
+      setTimeout(() => setState("idle"), 1500);
+    } catch {
+      setValue(prev); // revert on failure
+      setState("error");
+      setTimeout(() => setState("idle"), 2500);
+    }
+  }
+
+  const opts = options.includes(value) || !value ? options : [value, ...options];
+  return (
+    <span className="status-edit">
+      <select
+        className={`pill status-select ${statusClass(value)}`}
+        value={value}
+        onChange={(e) => change(e.target.value)}
+        disabled={state === "saving"}
+      >
+        {opts.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      {state === "saving" && <span className="save-ind">saving…</span>}
+      {state === "saved" && <span className="save-ind ok">✓ saved</span>}
+      {state === "error" && <span className="save-ind err">! failed</span>}
+    </span>
+  );
+}
+
+function PrepCard({ m, statuses }: { m: PrepEntry; statuses: string[] }) {
   const links = LINK_LABELS.filter(([k]) => m.links[k]);
   return (
     <div className="prep-card">
@@ -39,7 +97,11 @@ function PrepCard({ m }: { m: PrepEntry }) {
             {m.company}
             {m.founder && !m.company.includes(m.founder) ? ` · ${m.founder}` : ""}
           </h3>
-          {m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>}
+          {m.dealFlowEntryId ? (
+            <StatusSelect entryId={m.dealFlowEntryId} status={m.status || ""} options={statuses} />
+          ) : (
+            m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>
+          )}
         </div>
         {m.description && <div className="pc-desc">{m.description}</div>}
         {links.length > 0 ? (
@@ -82,10 +144,12 @@ function fmtDate(d: string): string {
 export default function MeetingPrep({
   data,
   loading,
+  statuses,
   onClose,
 }: {
   data: PrepResult | null;
   loading: boolean;
+  statuses: string[];
   onClose: () => void;
 }) {
   const totalMeetings = data?.days.reduce((n, d) => n + d.meetings.length, 0) ?? 0;
@@ -122,7 +186,7 @@ export default function MeetingPrep({
             {day.meetings.length === 0 ? (
               <div className="prep-day-empty">No external meetings.</div>
             ) : (
-              day.meetings.map((m, i) => <PrepCard m={m} key={i} />)
+              day.meetings.map((m, i) => <PrepCard m={m} statuses={statuses} key={i} />)
             )}
           </div>
         ))}

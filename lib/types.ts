@@ -18,6 +18,7 @@ export interface Identity {
   description?: string;
   domain?: string; // real domain, or undefined for none/dummy
   attioCompanyId?: string;
+  dealFlowEntryId?: string; // to write the pipeline status back
   attioPeopleIds?: { name: string; id: string }[];
   pipelineStatus?: Sourced; // deal_flow status: New / Pursue / Termsheet / Pass...
   sourcedBy?: string;
@@ -141,6 +142,7 @@ export interface PrepEntry {
   company: string;
   founder: string;
   status?: string;
+  dealFlowEntryId?: string; // present when the status is editable
   description?: string;
   links: PrepLinks;
 }

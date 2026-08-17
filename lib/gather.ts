@@ -450,6 +450,7 @@ export async function gatherContext(
       description: c?.description,
       domain,
       attioCompanyId: c?.recordId,
+      dealFlowEntryId: attio.dealFlowEntryId,
       attioPeopleIds: attio.people.map((p) => ({ name: p.name, id: p.recordId })),
       pipelineStatus: d?.status ? { value: d.status, sources: ["attio"] } : undefined,
       sourcedBy: d?.sourcedBy,

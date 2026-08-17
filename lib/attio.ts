@@ -16,9 +16,9 @@ function key(): string {
   return k;
 }
 
-async function api(path: string, body?: unknown): Promise<any> {
+async function api(path: string, body?: unknown, method?: string): Promise<any> {
   const res = await fetch(BASE + path, {
-    method: body === undefined ? "GET" : "POST",
+    method: method || (body === undefined ? "GET" : "POST"),
     headers: {
       Authorization: `Bearer ${key()}`,
       "Content-Type": "application/json",
@@ -32,6 +32,27 @@ async function api(path: string, body?: unknown): Promise<any> {
     throw new Error(`Attio ${path} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
   }
   return res.json();
+}
+
+const DEAL_FLOW_STATUS_ATTR = "9eb938eb-af9f-4f5e-8a26-ba2616b42a60";
+
+/** The deal_flow pipeline status options (ordered, active), as titles. */
+export async function listStatuses(): Promise<string[]> {
+  try {
+    const r = await api(`/lists/${DEAL_FLOW_SLUG}/attributes/${DEAL_FLOW_STATUS_ATTR}/statuses`);
+    return (r.data || []).filter((s: any) => !s.is_archived).map((s: any) => s.title);
+  } catch {
+    return [];
+  }
+}
+
+/** Write a new pipeline status onto a deal_flow list entry. */
+export async function updateStatus(entryId: string, status: string): Promise<void> {
+  await api(
+    `/lists/${DEAL_FLOW_SLUG}/entries/${entryId}`,
+    { data: { entry_values: { status } } },
+    "PATCH"
+  );
 }
 
 // ---------- value extractors (Attio wraps every value in a versioned array) ----------
@@ -197,6 +218,8 @@ export interface AttioResolution {
   };
   /** The founder's display name (from a person record, or the stealth company name). */
   founderName?: string;
+  /** The deal_flow list entry id — needed to write the pipeline status back. */
+  dealFlowEntryId?: string;
   allCompanyRecordIds: string[];
   people: ResolvedPerson[];
   emails: string[];
@@ -639,6 +662,7 @@ export async function resolveEntity(
       webUrl: featured.web_url,
     },
     founderName,
+    dealFlowEntryId: dealEntryId,
     allCompanyRecordIds: candidateCompanies.map((c) => recordId(c)),
     people: displayPeople,
     emails,

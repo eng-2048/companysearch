@@ -41,6 +41,7 @@ export default function Home() {
   const [prepMode, setPrepMode] = useState(false);
   const [prepData, setPrepData] = useState<PrepResult | null>(null);
   const [prepLoading, setPrepLoading] = useState(false);
+  const [statusOptions, setStatusOptions] = useState<string[]>([]);
   const comboRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -62,6 +63,10 @@ export default function Home() {
     fetch("/api/suggestions")
       .then((r) => r.json())
       .then(setSugs)
+      .catch(() => {});
+    fetch("/api/statuses")
+      .then((r) => r.json())
+      .then((d) => setStatusOptions(d.statuses || []))
       .catch(() => {});
   }, []);
 
@@ -160,7 +165,12 @@ export default function Home() {
       </p>
 
       {prepMode ? (
-        <MeetingPrep data={prepData} loading={prepLoading} onClose={() => setPrepMode(false)} />
+        <MeetingPrep
+          data={prepData}
+          loading={prepLoading}
+          statuses={statusOptions}
+          onClose={() => setPrepMode(false)}
+        />
       ) : (
         <>
       <form

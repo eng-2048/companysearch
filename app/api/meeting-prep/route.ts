@@ -25,6 +25,7 @@ const isCompanyDomain = (email: string): boolean => {
 
 interface Resolved {
   attioId?: string;
+  dealFlowEntryId?: string;
   company: string;
   founder: string;
   status?: string;
@@ -38,6 +39,7 @@ async function attioResolve(term: string, emailHints: string[]): Promise<Resolve
     const L: Links = b.links;
     return {
       attioId: b.identity.attioCompanyId,
+      dealFlowEntryId: b.identity.dealFlowEntryId,
       company: b.company,
       founder: b.founder,
       status: b.identity.pipelineStatus?.value,
@@ -115,6 +117,7 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
     company,
     founder: attendeeName || r?.founder || company,
     status: r?.status,
+    dealFlowEntryId: r?.dealFlowEntryId,
     description: r?.description,
     links: r?.links || {},
   };
