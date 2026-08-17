@@ -20,7 +20,11 @@ import { URL, URLSearchParams, fileURLToPath } from "node:url";
 // left as %20, which would break the file read.
 const ENV_PATH = fileURLToPath(new URL("../.env.local", import.meta.url));
 const REDIRECT = "http://localhost:5555/oauth2callback";
-const SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const SCOPE = [
+  "https://www.googleapis.com/auth/calendar.readonly", // read the calendar
+  "https://www.googleapis.com/auth/gmail.readonly", // read the email thread
+  "https://www.googleapis.com/auth/gmail.compose", // draft + send follow-ups (future)
+].join(" ");
 
 function readEnv() {
   const env = {};

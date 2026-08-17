@@ -6,6 +6,7 @@
 import { AttioResolution, resolveEntity } from "./attio";
 import { GrainResolution, resolveGrain, GrainRecordingData } from "./grain";
 import { CalendarResolution, resolveCalendar, calendarConfigured } from "./gcal";
+import { EmailResolution, resolveEmail, gmailConfigured } from "./gmail";
 import { normalize, to12h } from "./match";
 import {
   ContextBundle,
@@ -312,6 +313,40 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     if (fp) founder = fp.name;
   }
 
+  // --- Email thread (native Gmail) ---
+  // Search the founder/team addresses: people emails + external attendees on the
+  // matched meetings + external Grain participants.
+  const emailSearchSet = new Set(allEmails.map((e) => e.toLowerCase()));
+  for (const ev of calendar.events)
+    for (const a of ev.attendees) {
+      const dom = (a.email || "").split("@")[1]?.toLowerCase();
+      if (a.email && dom && dom !== "2048.vc") emailSearchSet.add(a.email.toLowerCase());
+    }
+  for (const r of grain.recordings)
+    for (const p of r.participants)
+      if (p.email && p.external) emailSearchSet.add(p.email.toLowerCase());
+
+  let email: EmailResolution = { configured: gmailConfigured(), available: false, messages: [] };
+  let emailError: string | undefined;
+  try {
+    email = await resolveEmail([...emailSearchSet]);
+  } catch (e: any) {
+    emailError = e?.message || "Email lookup failed";
+  }
+  const emailThread =
+    email.messages.length > 0
+      ? {
+          messages: email.messages.map((m) => ({
+            date: m.date,
+            from: m.fromName,
+            to: m.to,
+            oneLine: m.subject,
+          })),
+          intro: email.intro,
+          outcome: email.outcome,
+        }
+      : undefined;
+
   const introSource: Sourced | undefined =
     d?.introDByName || d?.introDByType
       ? {
@@ -359,12 +394,17 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
       resolution: "Run scripts/google-auth.mjs to add the full meeting list (attendees + RSVPs)",
     });
   }
-  gaps.push({
-    description: "Email thread not yet connected",
-    resolution: "Coming next — the intro source and outcome from the email thread",
-  });
+  if (!email.available) {
+    gaps.push({
+      description: "Gmail isn't connected yet",
+      resolution: "Enable the Gmail API + re-run scripts/google-auth.mjs for the email thread",
+    });
+  }
   if (calError) {
     gaps.push({ description: `Calendar lookup failed: ${calError}`, resolution: "Check the Google credentials / refresh token" });
+  }
+  if (emailError) {
+    gaps.push({ description: `Email lookup failed: ${emailError}`, resolution: "Check the Gmail scope / API" });
   }
   if (grainError) {
     gaps.push({ description: `Grain lookup failed: ${grainError}`, resolution: "Check the GRAIN_PAT token" });
@@ -386,6 +426,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     attio.found ? "Attio" : null,
     "Grain",
     calendar.configured ? "Calendar" : null,
+    email.available ? "Email" : null,
   ].filter(Boolean) as string[];
 
   return {
@@ -415,6 +456,7 @@ export async function gatherContext(query: string): Promise<ContextBundle> {
     timeline,
     meetings,
     grainRecordings,
+    emailThread,
     attioNotes: attio.notes,
     gaps,
   };

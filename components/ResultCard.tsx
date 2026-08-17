@@ -81,6 +81,8 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
     .join(" · ");
 
   // Visual timeline: intro, then meetings oldest → newest.
+  const introDate = b.emailThread?.messages[0]?.date;
+  const hasIntro = !!(b.introSource || b.emailThread?.intro);
   const ms = (iso?: string) => (iso ? new Date(iso).getTime() : 0);
   const meetingsChrono = [...b.meetings].sort((a, x) => ms(a.startISO) - ms(x.startISO));
   const grainsChrono = [...b.grainRecordings].sort((a, x) => a.date.localeCompare(x.date)).reverse();
@@ -148,10 +150,13 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
             <div className="section">
               <h3>Interaction timeline</h3>
               <div className="timeline-v">
-                {b.introSource && (
+                {hasIntro && (
                   <div className="tl-node tl-intro">
+                    {introDate && <div className="tl-when">{introDate}</div>}
                     <div className="tl-title">Introduced</div>
-                    <div className="tl-detail">via {b.introSource.value}</div>
+                    <div className="tl-detail">
+                      {b.introSource ? `via ${b.introSource.value}` : b.emailThread?.intro}
+                    </div>
                   </div>
                 )}
                 {meetingsChrono.map((m, i) => (
@@ -194,7 +199,7 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
                     )}
                   </div>
                 ))}
-                {!b.introSource && meetingsChrono.length === 0 && (
+                {!hasIntro && meetingsChrono.length === 0 && (
                   <div className="empty-note">No interactions on file.</div>
                 )}
               </div>
@@ -214,11 +219,16 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
             {b.emailThread && (
               <div className="section">
                 <h3>Email thread</h3>
+                {b.emailThread.outcome && (
+                  <div className="email-flag">
+                    <span className="ef-label">Latest</span> {b.emailThread.outcome}
+                  </div>
+                )}
                 {b.emailThread.messages.map((m, i) => (
                   <div className="row" key={i}>
                     <span className="when">{m.date}</span>
                     <span className="what">
-                      <b>{m.from}</b> → {m.to}: {m.oneLine}
+                      <b>{m.from}</b>: {m.oneLine}
                     </span>
                   </div>
                 ))}

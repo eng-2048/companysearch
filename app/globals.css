@@ -615,6 +615,24 @@ a:hover {
   font-size: 14px;
 }
 
+.email-flag {
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.email-flag .ef-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
 .pill-up {
   display: inline-block;
   font-size: 9px;

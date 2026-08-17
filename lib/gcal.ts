@@ -55,7 +55,7 @@ export function calendarConfigured(): boolean {
 // Cache the access token in-module for its lifetime.
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
-async function accessToken(): Promise<string> {
+export async function accessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
     return cachedToken.token;
   }
