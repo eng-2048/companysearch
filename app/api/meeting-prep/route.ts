@@ -13,16 +13,29 @@ function linkUrl(l?: { value: string; sources: string[] }): string | undefined {
   return l && l.value && l.sources[0] !== "unknown" ? l.value : undefined;
 }
 
+const INTERNAL_DOMAIN = "2048.vc";
+
 async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
+  // The external attendees are the reliable key — their email domain is the
+  // company. Prefer their name for the founder over anything derived from the
+  // (often unreliable) meeting title.
+  const externals = m.attendees.filter((a) => {
+    const dom = (a.email || "").split("@")[1]?.toLowerCase();
+    return dom && dom !== INTERNAL_DOMAIN;
+  });
+  const emailHints = externals.map((a) => a.email!).filter(Boolean);
+  const attendeeName = externals.find((a) => a.name && /\s/.test(a.name))?.name;
+
   let company = m.term;
-  let founder = m.term;
+  let founder = attendeeName || m.term;
   let status: string | undefined;
   let description: string | undefined;
   let links: PrepLinks = {};
   try {
-    const b = await gatherContext(m.term, { attioOnly: true });
+    const b = await gatherContext(m.term, { attioOnly: true, emailHints });
     company = b.company;
-    founder = b.founder;
+    // Trust the calendar attendee name for the founder; fall back to Attio.
+    founder = attendeeName || b.founder;
     status = b.identity.pipelineStatus?.value;
     description = b.identity.description;
     const L: Links = b.links;

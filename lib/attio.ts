@@ -290,10 +290,21 @@ function personMatchesSlug(
  * are only ever attached to the resolved company via a real link — a team edge,
  * a person->company link, or, for a founder-name query, a full-name match.
  */
-export async function resolveEntity(query: string): Promise<AttioResolution> {
+export async function resolveEntity(
+  query: string,
+  opts: { emailHints?: string[] } = {}
+): Promise<AttioResolution> {
   const term = cleanTerm(query) || query.trim();
   const queryIsPerson = looksLikePersonName(query);
   const qn = normName(term);
+
+  // Attendee/founder emails are the most reliable key (a meeting title is often a
+  // joke or a person's name; the email domain is the company). Include the query
+  // itself if it's an email.
+  const emailHints = [
+    ...(opts.emailHints || []),
+    ...(query.includes("@") ? [query.trim()] : []),
+  ].map((e) => e.toLowerCase());
 
   // Fire company + people searches together.
   const [companyHits, peopleHits] = await Promise.all([
@@ -322,6 +333,47 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     missingLinked.map((id) => getRecord(COMPANIES_OBJECT, id))
   );
   for (const c of linkedFetched) if (c) companyById.set(recordId(c), c);
+
+  // Email/domain resolution — the reliable key. Match each hint's domain to a
+  // company's domains, and the email to a person record (→ their company).
+  const emailMatchedIds = new Set<string>();
+  const GENERIC_DOMAINS = new Set([
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
+    "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com",
+  ]);
+  for (const email of [...new Set(emailHints)]) {
+    const dom = email.split("@")[1]?.toLowerCase();
+    if (!dom || GENERIC_DOMAINS.has(dom) || /\.(edu|ac\.[a-z]{2})$/.test(dom)) continue;
+    try {
+      const cr = await api(`/objects/${COMPANIES_OBJECT}/records/query`, {
+        filter: { domains: { $contains: dom } },
+        limit: 3,
+      });
+      for (const c of cr.data || []) {
+        companyById.set(recordId(c), c);
+        emailMatchedIds.add(recordId(c));
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const pr = await api(`/objects/${PEOPLE_OBJECT}/records/query`, {
+        filter: { email_addresses: { $contains: email } },
+        limit: 3,
+      });
+      for (const p of pr.data || []) {
+        const cid = first(p.values?.company)?.target_record_id;
+        if (!cid) continue;
+        if (!companyById.has(cid)) {
+          const rec = await getRecord(COMPANIES_OBJECT, cid);
+          if (rec) companyById.set(cid, rec);
+        }
+        if (companyById.has(cid)) emailMatchedIds.add(cid);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   // Fallback for stealth deals with no person record and a company name that
   // isn't the founder's (e.g. "Immortal Security" for Aurnov Chattopadhyay): the
@@ -370,8 +422,13 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
       if (rec) scored.push({ rec, score });
     }
     scored.sort((a, b) => b.score - a.score);
-    // Accept only a confident, unambiguous winner (first name must be present).
-    if (scored[0]?.score >= 2 && (scored.length === 1 || scored[0].score > scored[1].score)) {
+    // Accept either a confident first-name match that clearly wins, or a single
+    // unambiguous match on a distinctive token (e.g. "ravenna" -> "/in/jravenna",
+    // where the slug drops the first name).
+    const confidentWinner =
+      scored[0]?.score >= 2 && (scored.length === 1 || scored[0].score > scored[1].score);
+    const soleMatch = scored.length === 1 && scored[0].score >= 1;
+    if (confidentWinner || soleMatch) {
       companyById.set(recordId(scored[0].rec), scored[0].rec);
       matchedViaLinkedin = true;
     }
@@ -406,7 +463,12 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     const de = entries.find((e) => e.list_api_slug === DEAL_FLOW_SLUG);
     if (de) dealHits.push({ company: c, entryId: de.entry_id });
   }
-  dealHits.sort((a, b) => nameScore(b.company) - nameScore(a.company));
+  // An email/domain match is the strongest signal — rank those deal entries first.
+  const emailBonus = (c: any) => (emailMatchedIds.has(recordId(c)) ? 10 : 0);
+  dealHits.sort(
+    (a, b) =>
+      emailBonus(b.company) + nameScore(b.company) - (emailBonus(a.company) + nameScore(a.company))
+  );
 
   const dealEntryId = dealHits[0]?.entryId;
   const dealParentCompanyId = dealHits[0] ? recordId(dealHits[0].company) : undefined;
@@ -447,10 +509,15 @@ export async function resolveEntity(query: string): Promise<AttioResolution> {
     }
   }
 
-  // Featured company: the deal_flow parent, else the best name match.
+  // Featured company: prefer an email/domain-matched company (strongest signal),
+  // then the deal_flow parent, then the best name match.
   const byScore = [...candidateCompanies].sort((a, b) => nameScore(b) - nameScore(a));
+  const emailMatched = candidateCompanies.filter((c) => emailMatchedIds.has(recordId(c)));
   const featured =
-    candidateCompanies.find((c) => recordId(c) === dealParentCompanyId) || byScore[0];
+    emailMatched.find((c) => recordId(c) === dealParentCompanyId) ||
+    emailMatched[0] ||
+    candidateCompanies.find((c) => recordId(c) === dealParentCompanyId) ||
+    byScore[0];
   const featuredId = recordId(featured);
 
   // People, anchored to the featured company only:

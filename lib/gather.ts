@@ -129,9 +129,9 @@ function notFound(query: string): ContextBundle {
 
 export async function gatherContext(
   query: string,
-  opts: { attioOnly?: boolean } = {}
+  opts: { attioOnly?: boolean; emailHints?: string[] } = {}
 ): Promise<ContextBundle> {
-  const attio = await resolveEntity(query);
+  const attio = await resolveEntity(query, { emailHints: opts.emailHints });
 
   // Build Grain search terms from whatever we now know.
   const terms: string[] = [];
