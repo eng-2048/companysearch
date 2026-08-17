@@ -3,7 +3,7 @@
 // (primary), filtered to external deal meetings, with the company/founder
 // inferred from the meeting title (2048's titling conventions).
 
-import { listPrimaryWindow, calendarConfigured, internalNameTokens } from "./gcal";
+import { listPrimaryWindow, calendarConfigured, internalNameTokens, GCalEvent } from "./gcal";
 import { normalize } from "./match";
 
 const INTERNAL_DOMAIN = "2048.vc";
@@ -77,52 +77,72 @@ export interface DayMeeting {
   attendees: { name?: string; email?: string; rsvp?: string }[];
 }
 
-/** External deal meetings on a given day (default today) — the basis for meeting prep. */
-export async function getDayMeetings(
-  dateStr?: string
-): Promise<{ configured: boolean; date: string; meetings: DayMeeting[] }> {
-  const day = dateStr || new Date().toISOString().slice(0, 10);
-  if (!calendarConfigured()) return { configured: false, date: day, meetings: [] };
+/** Turn a calendar event into an external deal meeting, or null if it isn't one. */
+function eventToDayMeeting(ev: GCalEvent, teamTokens: string[]): DayMeeting | null {
+  if (/^grain data for/i.test(ev.title)) return null;
+  if (/\[\s*hold\s*\]/i.test(ev.title)) return null; // calendar hold, not a meeting
+  const attendees = ev.attendees || [];
+  if (attendees.length === 0 || attendees.length > 12) return null;
+
+  const internalTokens = new Set<string>(teamTokens);
+  let hasExternal = false;
+  for (const a of attendees) {
+    const dom = (a.email || "").split("@")[1]?.toLowerCase();
+    if (!dom) continue;
+    if (dom === INTERNAL_DOMAIN) {
+      if (a.name) for (const t of normalize(a.name).split(" ")) if (t.length > 2) internalTokens.add(t);
+    } else {
+      hasExternal = true;
+    }
+  }
+  if (!hasExternal) return null;
+
+  const term = deriveTerm(ev.title, internalTokens);
+  if (!term) return null;
+
+  return {
+    term,
+    title: ev.title,
+    startISO: ev.startISO,
+    time: ev.allDay ? undefined : ev.startISO.slice(11, 16),
+    upcoming: ev.upcoming,
+    attendees: attendees.map((a) => ({ name: a.name, email: a.email, rsvp: a.responseStatus })),
+  };
+}
+
+/** Local YYYY-MM-DD, `offset` days from today. */
+function localDate(offset: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** External deal meetings for the next `numDays` days (today first), grouped by date. */
+export async function getMultiDayMeetings(
+  numDays = 3
+): Promise<{ configured: boolean; days: { date: string; meetings: DayMeeting[] }[] }> {
+  if (!calendarConfigured()) return { configured: false, days: [] };
 
   const [events, teamTokens] = await Promise.all([
-    listPrimaryWindow(1, 2),
+    listPrimaryWindow(1, numDays),
     internalNameTokens(),
   ]);
 
-  const out: DayMeeting[] = [];
+  const dates = Array.from({ length: numDays }, (_, i) => localDate(i));
+  const byDate = new Map<string, DayMeeting[]>(dates.map((d) => [d, []]));
   for (const ev of events) {
-    if (ev.startISO.slice(0, 10) !== day) continue;
-    if (/^grain data for/i.test(ev.title)) continue;
-    const attendees = ev.attendees || [];
-    if (attendees.length === 0 || attendees.length > 12) continue;
-
-    const internalTokens = new Set<string>(teamTokens);
-    let hasExternal = false;
-    for (const a of attendees) {
-      const dom = (a.email || "").split("@")[1]?.toLowerCase();
-      if (!dom) continue;
-      if (dom === INTERNAL_DOMAIN) {
-        if (a.name) for (const t of normalize(a.name).split(" ")) if (t.length > 2) internalTokens.add(t);
-      } else {
-        hasExternal = true;
-      }
-    }
-    if (!hasExternal) continue;
-
-    const term = deriveTerm(ev.title, internalTokens);
-    if (!term) continue;
-
-    out.push({
-      term,
-      title: ev.title,
-      startISO: ev.startISO,
-      time: ev.allDay ? undefined : ev.startISO.slice(11, 16),
-      upcoming: ev.upcoming,
-      attendees: attendees.map((a) => ({ name: a.name, email: a.email, rsvp: a.responseStatus })),
-    });
+    const bucket = byDate.get(ev.startISO.slice(0, 10));
+    if (!bucket) continue;
+    const dm = eventToDayMeeting(ev, teamTokens);
+    if (dm) bucket.push(dm);
   }
-  out.sort((a, b) => a.startISO.localeCompare(b.startISO));
-  return { configured: true, date: day, meetings: out };
+
+  const days = dates.map((date) => ({
+    date,
+    meetings: (byDate.get(date) || []).sort((a, b) => a.startISO.localeCompare(b.startISO)),
+  }));
+  return { configured: true, days };
 }
 
 export async function getMeetingSuggestions(

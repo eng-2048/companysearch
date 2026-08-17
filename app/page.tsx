@@ -52,7 +52,7 @@ export default function Home() {
       const res = await fetch("/api/meeting-prep");
       setPrepData(await res.json());
     } catch {
-      setPrepData({ configured: false, date: new Date().toISOString().slice(0, 10), meetings: [] });
+      setPrepData({ configured: false, days: [] });
     } finally {
       setPrepLoading(false);
     }

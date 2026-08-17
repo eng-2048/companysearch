@@ -75,7 +75,8 @@ function fmtDate(d: string): string {
   today.setHours(0, 0, 0, 0);
   const diff = Math.round((dt.getTime() - today.getTime()) / 864e5);
   const label = dt.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-  return diff === 0 ? `Today · ${label}` : label;
+  const prefix = diff === 0 ? "Today · " : diff === 1 ? "Tomorrow · " : "";
+  return prefix + label;
 }
 
 export default function MeetingPrep({
@@ -87,10 +88,12 @@ export default function MeetingPrep({
   loading: boolean;
   onClose: () => void;
 }) {
+  const totalMeetings = data?.days.reduce((n, d) => n + d.meetings.length, 0) ?? 0;
+
   return (
     <div className="prep">
       <div className="prep-head">
-        <h2>{data ? fmtDate(data.date) : "Meeting prep"}</h2>
+        <h2>Meeting prep · next 3 days</h2>
         <button className="prep-back" onClick={onClose}>
           ← Search
         </button>
@@ -103,15 +106,26 @@ export default function MeetingPrep({
         </div>
       )}
 
-      {!loading && data && data.meetings.length === 0 && (
-        <div className="empty-note">
-          {data.configured
-            ? "No external meetings on your calendar for this day."
-            : "Google Calendar isn't connected."}
-        </div>
+      {!loading && data && !data.configured && (
+        <div className="empty-note">Google Calendar isn&apos;t connected.</div>
       )}
 
-      {!loading && data && data.meetings.map((m, i) => <PrepCard m={m} key={i} />)}
+      {!loading && data && data.configured && totalMeetings === 0 && (
+        <div className="empty-note">No external meetings in the next 3 days.</div>
+      )}
+
+      {!loading &&
+        data &&
+        data.days.map((day) => (
+          <div className="prep-day" key={day.date}>
+            <div className="prep-day-head">{fmtDate(day.date)}</div>
+            {day.meetings.length === 0 ? (
+              <div className="prep-day-empty">No external meetings.</div>
+            ) : (
+              day.meetings.map((m, i) => <PrepCard m={m} key={i} />)
+            )}
+          </div>
+        ))}
     </div>
   );
 }

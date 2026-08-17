@@ -145,10 +145,14 @@ export interface PrepEntry {
   links: PrepLinks;
 }
 
-export interface PrepResult {
-  configured: boolean;
+export interface PrepDay {
   date: string;
   meetings: PrepEntry[];
+}
+
+export interface PrepResult {
+  configured: boolean;
+  days: PrepDay[];
 }
 
 /** Streaming protocol between backend and UI. */
