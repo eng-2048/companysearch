@@ -61,9 +61,10 @@ const EQUITY_SYSTEM = `You read a VC meeting transcript and pull each founder's 
 Return one line per founder whose equity is stated, formatted exactly:
 Name = <short value>
 
-The value is a brief, faithful descriptor of what was said — e.g. "50%", "~42% (15% option pool)", "equal split", "60/40". If the founders describe an equal split with an option pool but no exact per-person number, write it plainly (e.g. "equal, 15% ESOP"). Use the founder names given, not nicknames.
+The value is a brief, faithful descriptor of what was said — e.g. "50%", "~42%, 15% option pool", "equal split", "60/40". If the founders describe an equal split with an option pool but no exact per-person number, write it plainly (e.g. "equal, 15% ESOP"). Use the founder names given, not nicknames.
 
 Hard rules:
+- Do NOT put parentheses in the value (it gets wrapped in parens downstream) — use commas.
 - Only report what was explicitly said. Never guess or infer a number that wasn't stated.
 - If equity / ownership / the cap table is not discussed at all, return the single word NONE.
 - Output only the "Name = value" lines (or NONE). No preamble, no other text.`;
@@ -111,6 +112,59 @@ export async function extractEquity(
     return map;
   } catch {
     return {};
+  }
+}
+
+const ROUND_SYSTEM = `You read a VC meeting transcript and write the "Round" line for the deal-feedback form, in Zann's terse style, capturing ONLY what was said about financing.
+
+Include, when stated: how much they've already raised (and from whom / on what terms or cap), how much they're raising now (and the round type — pre-seed / seed / etc.), any valuation or cap (e.g. "on $8M post", "at $12M cap"), and how much is committed / circled / available.
+
+Match the format and voice of these real examples:
+- Raised $250K, now raising $2M
+- Raised $820K from Techstars and Valia, wants to raise $3-5M now
+- Raising $2.5M pre-seed
+- Raised $2.3M pre-seed (10M post), now raising $3.5M seed at 13.5M post. Has ~$1M available.
+- Raising 2.25 on 8.75M post; has 1.5 circled
+- Raised $750K uncapped w/ 20% discount, raising $4-5M seed
+
+Rules:
+- Only what was explicitly discussed on the call. Never invent numbers, investors, caps, or valuations.
+- One short line (two at most). No bullets, no preamble, no other text.
+- If financing / the round is not discussed at all, return the single word NONE.`;
+
+/** Pull the round (raised / raising / valuation) from the transcript, in Zann's
+ *  format. Returns null when no key, no transcript, or nothing was said. */
+export async function extractRound(transcript: string | undefined): Promise<string | null> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key || !transcript) return null;
+  try {
+    const res = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 300,
+        system: ROUND_SYSTEM,
+        messages: [{ role: "user", content: `Transcript:\n${transcript}` }],
+      }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j.stop_reason === "refusal") return null;
+    const text = (j.content || [])
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("")
+      .trim();
+    if (!text || /^none$/i.test(text)) return null;
+    return text;
+  } catch {
+    return null;
   }
 }
 

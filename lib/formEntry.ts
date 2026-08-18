@@ -10,7 +10,7 @@
 import { resolveEntity, AttioResolution, DealFlow } from "./attio";
 import { getPastDaysMeetings, companyTermsForEmail, DayMeeting } from "./suggestions";
 import { resolveGrain, getTranscript } from "./grain";
-import { draftNotes, extractEquity } from "./notesDraft";
+import { draftNotes, extractEquity, extractRound } from "./notesDraft";
 import { normalize } from "./match";
 import {
   FormEntryList,
@@ -318,7 +318,8 @@ async function buildDraft(
   const founderList = founderEntries(attio, founderFallback);
   const equity = await extractEquity(grain?.transcript, founderList.map((e) => e.name));
   const founders = formatFounders(founderList, equity);
-  const round = roundLine(d);
+  // Round: prefer what was said on the call (raised / raising / valuation), else Attio.
+  const round = (await extractRound(grain?.transcript)) || roundLine(d);
   // Other Notes: LLM draft in Zann's voice when a key is set, else Grain bullets.
   const styled = await draftNotes({
     company,
@@ -375,28 +376,33 @@ async function buildDraft(
   return { fields, prefillUrl };
 }
 
-/** The pick-list: recent external meetings that already happened. Lightweight —
- *  just the calendar scan, NO Attio/Grain resolution (that's done per meeting,
- *  on demand, only when the user clicks Draft). */
+/** The pick-list: recent external meetings that already happened. Each row is
+ *  resolved to its real Attio company name (so every row shows the company, not
+ *  a personal-email guess). This is Attio-only — no Grain/LLM, no drafting — and
+ *  the whole result is day-cached, so the resolution cost is paid once per day.
+ *  Drafting (Grain + the LLM notes) still happens on demand per meeting. */
 export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
   const { configured, meetings } = await getPastDaysMeetings(numDays);
   if (!configured) return { configured: false, meetings: [] };
-  return {
-    configured: true,
-    meetings: meetings.map(({ date, m }) => {
+
+  const items = await Promise.all(
+    meetings.map(async ({ date, m }) => {
       const ext = externalAttendees(m);
-      // The person we met (calendar name preferred, else derived from the email),
-      // and a company guessed from the email domain — the title-derived term is
-      // often an internal name (e.g. "Zann Ali") so it's only a last resort.
       const person =
         ext.find((a) => a.name && /\s/.test(a.name))?.name ||
         ext.find((a) => a.name)?.name ||
         nameFromEmailLocal(ext[0]?.email);
+
+      // Resolve the real company name from Attio; fall back to the email domain,
+      // then the title-derived term (never an internal name like "Zann Ali").
+      const resolved = await resolveToAttio(m);
       const company =
+        (resolved ? cleanName(resolved.attio.featuredCompany!.name) : undefined) ||
         companyFromEmail(ext[0]?.email) ||
         (m.term && !isInternalName(m.term) && normalize(m.term) !== normalize(person || "")
           ? m.term
           : undefined);
+
       return {
         date,
         time: m.time,
@@ -406,8 +412,9 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
         term: m.term,
         attendees: ext.map((a) => ({ name: a.name, email: a.email })),
       };
-    }),
-  };
+    })
+  );
+  return { configured: true, meetings: items };
 }
 
 export interface DraftInput {
