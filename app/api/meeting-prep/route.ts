@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { getMultiDayMeetings, DayMeeting, companyTermsForEmail } from "@/lib/suggestions";
 import { gatherContext } from "@/lib/gather";
-import { Links, PrepEntry, PrepLinks } from "@/lib/types";
+import { Links, PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
+import { readDayCache, writeDayCache } from "@/lib/dayCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -125,6 +126,17 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
 
 export async function GET(req: NextRequest) {
   const numDays = Number(req.nextUrl.searchParams.get("days") ?? 3);
+  const refresh = req.nextUrl.searchParams.get("refresh") === "1";
+  const cacheKey = `meeting-prep-d${numDays}`;
+
+  // Serve today's cached scan unless a refresh was asked for.
+  if (!refresh) {
+    const cached = await readDayCache<PrepResult>(cacheKey);
+    if (cached) {
+      return Response.json({ ...cached.value, generatedAt: cached.generatedAt, cached: true });
+    }
+  }
+
   const { configured, days } = await getMultiDayMeetings(numDays);
 
   // Resolve every meeting across all days in parallel, then regroup by day.
@@ -136,8 +148,14 @@ export async function GET(req: NextRequest) {
   const byDate = new Map<string, PrepEntry[]>(days.map((d) => [d.date, []]));
   for (const { date, entry } of resolved) byDate.get(date)!.push(entry);
 
-  return Response.json({
+  const generatedAt = new Date().toISOString();
+  const result: PrepResult = {
     configured,
     days: days.map((d) => ({ date: d.date, meetings: byDate.get(d.date) || [] })),
-  });
+  };
+
+  // Cache a real scan (don't persist an unconfigured/no-calendar result — retry next time).
+  if (configured) await writeDayCache(cacheKey, result, generatedAt);
+
+  return Response.json({ ...result, generatedAt, cached: false });
 }

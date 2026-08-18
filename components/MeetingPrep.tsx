@@ -26,16 +26,12 @@ const LINK_LABELS: [keyof PrepLinks, string][] = [
   ["attioRecord", "Attio Record"],
 ];
 
+// The only moves you make from a prep screen: keep the current status, or bump it
+// forward. Exact Attio titles (a wrong title fails the write).
+const FORWARD_STATUSES = ["1st Screen", "Deep Dive", "Diligence"];
+
 /** Editable pipeline status — writes the change back to Attio on select. */
-function StatusSelect({
-  entryId,
-  status,
-  options,
-}: {
-  entryId: string;
-  status: string;
-  options: string[];
-}) {
+function StatusSelect({ entryId, status }: { entryId: string; status: string }) {
   const [value, setValue] = useState(status);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
@@ -61,7 +57,10 @@ function StatusSelect({
     }
   }
 
-  const opts = options.includes(value) || !value ? options : [value, ...options];
+  // Current status (whatever it is) + the three forward moves, deduped.
+  const opts = value
+    ? [value, ...FORWARD_STATUSES.filter((s) => s !== value)]
+    : FORWARD_STATUSES;
   return (
     <span className="status-edit">
       <select
@@ -69,7 +68,9 @@ function StatusSelect({
         value={value}
         onChange={(e) => change(e.target.value)}
         disabled={state === "saving"}
+        title="Change pipeline status — writes to Attio"
       >
+        {!value && <option value="">— set status —</option>}
         {opts.map((o) => (
           <option key={o} value={o}>
             {o}
@@ -83,7 +84,7 @@ function StatusSelect({
   );
 }
 
-function PrepCard({ m, statuses }: { m: PrepEntry; statuses: string[] }) {
+function PrepCard({ m }: { m: PrepEntry }) {
   const links = LINK_LABELS.filter(([k]) => m.links[k]);
   return (
     <div className="prep-card">
@@ -98,7 +99,7 @@ function PrepCard({ m, statuses }: { m: PrepEntry; statuses: string[] }) {
             {m.founder && !m.company.includes(m.founder) ? ` · ${m.founder}` : ""}
           </h3>
           {m.dealFlowEntryId ? (
-            <StatusSelect entryId={m.dealFlowEntryId} status={m.status || ""} options={statuses} />
+            <StatusSelect entryId={m.dealFlowEntryId} status={m.status || ""} />
           ) : (
             m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>
           )}
@@ -141,29 +142,49 @@ function fmtDate(d: string): string {
   return prefix + label;
 }
 
+function fmtUpdated(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sameDay = d >= today;
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return sameDay ? `Updated ${time}` : `Updated ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
+}
+
 export default function MeetingPrep({
   data,
   loading,
-  statuses,
+  onRefresh,
   onClose,
 }: {
   data: PrepResult | null;
   loading: boolean;
-  statuses: string[];
+  onRefresh: () => void;
   onClose: () => void;
 }) {
   const totalMeetings = data?.days.reduce((n, d) => n + d.meetings.length, 0) ?? 0;
+  const updated = fmtUpdated(data?.generatedAt);
 
   return (
     <div className="prep">
       <div className="prep-head">
-        <h2>Meeting prep · next 3 days</h2>
-        <button className="prep-back" onClick={onClose}>
-          ← Search
-        </button>
+        <div className="prep-title">
+          <h2>Meeting prep · next 3 days</h2>
+          {updated && <span className="prep-updated">{updated}</span>}
+        </div>
+        <div className="prep-actions">
+          <button className="prep-back" onClick={onRefresh} disabled={loading} title="Re-scan the calendar now">
+            {loading && data ? "Refreshing…" : "↻ Refresh"}
+          </button>
+          <button className="prep-back" onClick={onClose}>
+            ← Search
+          </button>
+        </div>
       </div>
 
-      {loading && (
+      {loading && !data && (
         <div className="status-line">
           <span className="spinner" />
           <span>Scanning your calendar and pulling each company…</span>
@@ -186,7 +207,7 @@ export default function MeetingPrep({
             {day.meetings.length === 0 ? (
               <div className="prep-day-empty">No external meetings.</div>
             ) : (
-              day.meetings.map((m, i) => <PrepCard m={m} statuses={statuses} key={i} />)
+              day.meetings.map((m, i) => <PrepCard m={m} key={i} />)
             )}
           </div>
         ))}

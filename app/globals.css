@@ -66,8 +66,12 @@ a:hover {
   color: var(--text-faint);
   font-family: var(--mono);
 }
-.masthead .prep-btn {
+.masthead .mast-actions {
   margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.masthead .prep-btn {
   background: var(--bg-elev-2);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -98,6 +102,26 @@ a:hover {
   font-size: 19px;
   font-weight: 650;
   letter-spacing: -0.01em;
+}
+.prep-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.prep-updated {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+.prep-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prep-back:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .prep-back {
   background: none;
@@ -186,11 +210,19 @@ a:hover {
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
-  padding-right: 22px;
+  padding: 4px 24px 4px 12px;
+  min-width: 108px;
+  text-align: left;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%239aa4b1' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 8px center;
+  background-position: right 9px center;
   outline: none;
+}
+/* the native option menu renders in the OS theme — keep it readable */
+.status-select option {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-family: var(--sans);
 }
 .status-select:hover {
   filter: brightness(1.12);
@@ -209,6 +241,241 @@ a:hover {
 }
 .save-ind.err {
   color: var(--red);
+}
+
+/* ---------- Form Entry ---------- */
+.fe-note {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: -6px 0 20px;
+  max-width: 620px;
+}
+.fe-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+.fe-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.fe-head h3 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.fe-when {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+.fe-open {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #06121f;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.fe-open:hover {
+  opacity: 0.9;
+  text-decoration: none;
+}
+.fe-open:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fe-toggle {
+  flex-shrink: 0;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.fe-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.fe-attendees {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+.fe-warn {
+  margin-top: 4px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 7px 11px;
+}
+.fe-draft {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.fe-draft .fe-open {
+  display: inline-block;
+  margin-bottom: 12px;
+}
+.fe-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* interactive judgment-field controls */
+.fe-select {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 13px;
+  font-family: var(--sans);
+  cursor: pointer;
+  outline: none;
+}
+.fe-select:focus {
+  border-color: var(--accent);
+}
+.fe-select option {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.fe-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fe-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 4px 11px 4px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.fe-check:hover {
+  border-color: var(--accent);
+}
+.fe-check.on {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.fe-check input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.fe-textarea {
+  width: 100%;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  font-size: 13px;
+  font-family: var(--sans);
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+.fe-textarea:focus {
+  border-color: var(--accent);
+}
+.fe-fields {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.fe-row {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.fe-row dt {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.fe-row dd {
+  min-width: 0;
+  word-break: break-word;
+}
+.fe-val {
+  color: var(--text);
+  white-space: pre-line; /* keep multi-founder line breaks in the app view */
+}
+.fe-link {
+  color: var(--accent);
+  word-break: break-all;
+}
+.fe-blank {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.fe-fill {
+  color: var(--amber);
+  font-style: italic;
+  opacity: 0.85;
+}
+.fe-skipped {
+  margin-top: 18px;
+  font-size: 13px;
+}
+.fe-skipped summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.fe-skipped ul {
+  list-style: none;
+  margin-top: 10px;
+}
+.fe-skipped li {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  color: var(--text-faint);
+}
+.fe-skip-co {
+  font-weight: 600;
+  color: var(--text-dim);
+  min-width: 140px;
+  flex-shrink: 0;
+}
+.fe-skip-why {
+  font-size: 12.5px;
 }
 .pc-links {
   display: flex;

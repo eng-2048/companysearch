@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ContextBundle, SearchEvent, PrepResult } from "@/lib/types";
+import { ContextBundle, SearchEvent, PrepResult, FormEntryList } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
 import MeetingPrep from "@/components/MeetingPrep";
+import FormEntry from "@/components/FormEntry";
 
 interface Suggestion {
   term: string;
@@ -41,16 +42,22 @@ export default function Home() {
   const [prepMode, setPrepMode] = useState(false);
   const [prepData, setPrepData] = useState<PrepResult | null>(null);
   const [prepLoading, setPrepLoading] = useState(false);
-  const [statusOptions, setStatusOptions] = useState<string[]>([]);
+  const [formMode, setFormMode] = useState(false);
+  const [formData, setFormData] = useState<FormEntryList | null>(null);
+  const [formLoading, setFormLoading] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  async function openPrep() {
+  async function openPrep(force = false) {
+    setFormMode(false);
     setPrepMode(true);
+    // Reuse this session's scan when navigating back — no refetch. The server
+    // also day-caches, so even a fresh load / reload is instant after the first.
+    if (!force && prepData) return;
     setPrepLoading(true);
-    setPrepData(null);
+    if (!force) setPrepData(null); // first load shows the spinner; refresh keeps old data
     try {
-      const res = await fetch("/api/meeting-prep");
+      const res = await fetch(`/api/meeting-prep${force ? "?refresh=1" : ""}`);
       setPrepData(await res.json());
     } catch {
       setPrepData({ configured: false, days: [] });
@@ -59,14 +66,27 @@ export default function Home() {
     }
   }
 
+  async function openForm(force = false) {
+    setPrepMode(false);
+    setFormMode(true);
+    // Reuse this session's list (and any drafted cards) — no refetch on return.
+    if (!force && formData) return;
+    setFormLoading(true);
+    if (!force) setFormData(null);
+    try {
+      const res = await fetch(`/api/form-entry${force ? "?refresh=1" : ""}`);
+      setFormData(await res.json());
+    } catch {
+      setFormData({ configured: false, meetings: [] });
+    } finally {
+      setFormLoading(false);
+    }
+  }
+
   useEffect(() => {
     fetch("/api/suggestions")
       .then((r) => r.json())
       .then(setSugs)
-      .catch(() => {});
-    fetch("/api/statuses")
-      .then((r) => r.json())
-      .then((d) => setStatusOptions(d.statuses || []))
       .catch(() => {});
   }, []);
 
@@ -156,9 +176,14 @@ export default function Home() {
       <div className="masthead">
         <h1>Company Search</h1>
         <span className="brand">2048 Ventures</span>
-        <button className="prep-btn" onClick={openPrep}>
-          Meeting Prep
-        </button>
+        <div className="mast-actions">
+          <button className="prep-btn" onClick={() => openPrep()}>
+            Meeting Prep
+          </button>
+          <button className="prep-btn" onClick={() => openForm()}>
+            Form Entry
+          </button>
+        </div>
       </div>
       <p className="subtitle">
         Search a company or founder — or pick one of this week&apos;s meetings to prep.
@@ -168,11 +193,14 @@ export default function Home() {
         <MeetingPrep
           data={prepData}
           loading={prepLoading}
-          statuses={statusOptions}
+          onRefresh={() => openPrep(true)}
           onClose={() => setPrepMode(false)}
         />
       ) : (
         <>
+        {/* Form Entry stays mounted (just hidden) so drafted cards + edits
+            survive navigating back to Search. */}
+        <div hidden={formMode}>
       <form
         className="searchbar"
         onSubmit={(e) => {
@@ -228,6 +256,15 @@ export default function Home() {
 
       {error && <div className="error-box">⚠ {error}</div>}
       {bundle && <ResultCard bundle={bundle} />}
+        </div>
+        <div hidden={!formMode}>
+          <FormEntry
+            data={formData}
+            loading={formLoading}
+            onRefresh={() => openForm(true)}
+            onClose={() => setFormMode(false)}
+          />
+        </div>
         </>
       )}
     </div>

@@ -67,6 +67,24 @@ async function getDetail(id: string): Promise<any | undefined> {
   }
 }
 
+/** The full transcript for a recording, as "Speaker: text" lines. Grain returns
+ *  it inline as transcript_json when we ask for format=json (the *_txt_url is a
+ *  separate signed URL that rejects our token). Bounded so it stays LLM-sized. */
+export async function getTranscript(id: string): Promise<string | undefined> {
+  try {
+    const r = await api(`/recordings/${id}?transcript_format=json`);
+    const segs = r?.transcript_json;
+    if (!Array.isArray(segs) || segs.length === 0) return undefined;
+    const text = segs
+      .map((s: any) => `${s.speaker || "?"}: ${String(s.text || "").trim()}`)
+      .filter((l: string) => l.length > 3)
+      .join("\n");
+    return text ? text.slice(0, 60000) : undefined; // ~15k tokens ceiling
+  } catch {
+    return undefined;
+  }
+}
+
 /** Grain summary_points may be strings or {timestamp, text} objects — coerce to text. */
 function toPointStrings(points: any): string[] {
   if (!Array.isArray(points)) return [];

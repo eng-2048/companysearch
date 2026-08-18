@@ -155,6 +155,58 @@ export interface PrepDay {
 export interface PrepResult {
   configured: boolean;
   days: PrepDay[];
+  generatedAt?: string; // ISO timestamp of the scan (from cache or fresh)
+  cached?: boolean; // true when served from the day cache
+}
+
+// ---- Form Entry (post-meeting deal-feedback drafter) ----
+/** How a form field is presented in the drafted card. */
+export type FieldControl = "readonly" | "select" | "multiselect" | "longtext";
+
+/** One drafted field of the First Meeting Deal Feedback form. */
+export interface FormField {
+  label: string;
+  value?: string; // drafted value (factual fields; the seeded notes draft)
+  blankReason?: string; // why a factual field is blank (flagged, not guessed)
+  control?: FieldControl; // interactive control type; defaults to readonly
+  options?: string[]; // select/multiselect: the exact Airtable option names
+  prefillField?: string; // Airtable field name for the prefill param (defaults to label)
+}
+
+/** A recent meeting in the pick-list (lightweight — calendar only, no resolution). */
+export interface FormEntryListItem {
+  date: string; // YYYY-MM-DD
+  time?: string; // HH:MM (24h; formatted client-side)
+  title: string;
+  person?: string; // the external attendee we met (for the row label)
+  company?: string; // company guessed from the email domain (row label)
+  term: string; // the title-derived term — used as the draft resolution key
+  attendees: { name?: string; email?: string }[];
+}
+
+export interface FormEntryList {
+  configured: boolean;
+  meetings: FormEntryListItem[];
+  generatedAt?: string; // ISO timestamp of the scan (from cache or fresh)
+  cached?: boolean; // true when served from the day cache
+}
+
+/** A drafted form for one meeting (generated on demand when the user clicks Draft). */
+export interface FormEntryMeeting {
+  date: string;
+  time?: string;
+  title: string;
+  company: string;
+  founder?: string;
+  attendees: { name?: string; email?: string }[];
+  fields: FormField[]; // the drafted form, in section order
+  prefillUrl: string; // opens the real Airtable form pre-filled
+}
+
+export interface FormDraftResponse {
+  resolved: boolean;
+  note?: string; // e.g. "Not in the deal pipeline" / "Couldn't match to an Attio record"
+  meeting?: FormEntryMeeting; // present when resolved
 }
 
 /** Streaming protocol between backend and UI. */

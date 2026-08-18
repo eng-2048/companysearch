@@ -177,6 +177,37 @@ export async function getMultiDayMeetings(
   return { configured: true, days };
 }
 
+/**
+ * External deal meetings that have ALREADY HAPPENED in the last `numDays` days
+ * (today included), most-recent first. The basis for post-meeting Form Entry.
+ */
+export async function getPastDaysMeetings(
+  numDays = 3
+): Promise<{ configured: boolean; meetings: { date: string; m: DayMeeting }[] }> {
+  if (!calendarConfigured()) return { configured: false, meetings: [] };
+
+  const [events, teamTokens] = await Promise.all([
+    // look back numDays, +1 forward so we capture all of today's window
+    listPrimaryWindow(numDays, 1),
+    internalNameTokens(),
+  ]);
+
+  // today, yesterday, day-before … (numDays calendar days back through today)
+  const dateSet = new Set(Array.from({ length: numDays }, (_, i) => localDate(-i)));
+
+  const out: { date: string; m: DayMeeting }[] = [];
+  for (const ev of events) {
+    const day = ev.startISO.slice(0, 10);
+    if (!dateSet.has(day)) continue;
+    const dm = eventToDayMeeting(ev, teamTokens);
+    if (!dm) continue;
+    if (dm.upcoming) continue; // only meetings that already occurred
+    out.push({ date: day, m: dm });
+  }
+  out.sort((a, b) => b.m.startISO.localeCompare(a.m.startISO));
+  return { configured: true, meetings: out };
+}
+
 export async function getMeetingSuggestions(
   daysBack = 7,
   daysForward = 7
