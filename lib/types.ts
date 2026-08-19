@@ -305,6 +305,22 @@ export interface PassDraftResponse {
   draft?: PassEmailDraft;
 }
 
+export interface PassThreadMessage {
+  date: string;
+  who: string;
+  subject: string;
+  snippet: string;
+}
+
+export interface PassThreadPreview {
+  found: boolean;
+  subject?: string; // "Re: …" reply subject
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
+  messages: PassThreadMessage[];
+}
+
 export interface PassSendResponse {
   ok: boolean;
   sent: boolean;

@@ -25,6 +25,7 @@ import {
   TEST_RECIPIENT,
   senderEmail,
   findLatestThread,
+  resolveEmail,
 } from "./gmail";
 import {
   PassFollowUpList,
@@ -34,13 +35,20 @@ import {
   PassMeetingRef,
   PassEmailDraft,
   PassDraftResponse,
+  PassThreadPreview,
 } from "./types";
 
 const DEFAULT_SUBJECT = "Follow Up From 2048 Ventures";
+// Scope To Pass to Zann's own deals (the pipeline is shared across the team).
+const ZANN_MEMBER_ID = "8a182b51-6194-4b04-85e0-991657cfe9db";
 // Resolve at most this many To Pass deals per load (newest first) so the first
 // uncached scan stays responsive; the true total is surfaced separately.
 const MAX_TO_PASS_RESOLVE = 40;
-const MAX_TO_PASS_FETCH = 200;
+const MAX_TO_PASS_FETCH = 300;
+
+// Recent meetings in these states are done deals (won or already dead) — not
+// follow-up candidates, so they're dropped from the list.
+const DROP_RECENT_STATUS = /\b(pass|closed|closing|lost)\b/i;
 
 const GENERIC_EMAIL_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
@@ -174,7 +182,7 @@ export async function listPassFollowUp(numDays = 10): Promise<PassFollowUpList> 
   // ——— To Pass deals (any age) ———
   // Fetch the whole set (to report the true total), newest first, then resolve
   // only the top slice so the first uncached scan stays responsive.
-  const allDeals = await listDealsByStatus("To Pass", MAX_TO_PASS_FETCH);
+  const allDeals = await listDealsByStatus("To Pass", MAX_TO_PASS_FETCH, ZANN_MEMBER_ID);
   const toPassTotal = allDeals.length;
   const sortedDeals = [...allDeals].sort((a, b) =>
     String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
@@ -226,9 +234,11 @@ export async function listPassFollowUp(numDays = 10): Promise<PassFollowUpList> 
   );
   for (const item of resolvedRecent) {
     if (!item) continue;
-    const status = (item.status || "").toLowerCase();
-    if (status === "pass") continue; // already passed
-    if (seen.has(item.recordId)) continue; // already shown up top / de-dupe
+    // Drop done deals (Pass / Closed / Closing / Lost) and de-dupe against the
+    // To Pass section. Rows that didn't resolve to an Attio company are already
+    // filtered out above (null).
+    if (DROP_RECENT_STATUS.test(item.status || "")) continue;
+    if (seen.has(item.recordId)) continue;
     seen.add(item.recordId);
     recent.push(item);
   }
@@ -281,6 +291,42 @@ async function grainFor(
   }
 }
 
+/** The latest email thread with these addresses, plus a short message preview —
+ *  shown at the review step so the user can see what they'd be replying to. */
+export async function getThreadPreview(emails: string[]): Promise<PassThreadPreview> {
+  const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))];
+  if (!clean.length) return { found: false, messages: [] };
+
+  const [thread, mail] = await Promise.all([findLatestThread(clean), resolveEmail(clean)]);
+  const toMsg = (m: any) => ({
+    date: m.date,
+    who: `${m.fromName}${m.fromEmail?.endsWith("@2048.vc") ? " (2048)" : ""}`,
+    subject: m.subject,
+    snippet: m.snippet,
+  });
+
+  if (!thread) {
+    return { found: false, messages: (mail.messages || []).slice(-6).map(toMsg) };
+  }
+  const subject = thread.subject
+    ? /^re:/i.test(thread.subject)
+      ? thread.subject
+      : `Re: ${thread.subject}`
+    : "Follow Up From 2048 Ventures";
+  const messages = (mail.messages || [])
+    .filter((m: any) => m.threadId === thread.threadId)
+    .slice(-6)
+    .map(toMsg);
+  return {
+    found: true,
+    subject,
+    threadId: thread.threadId,
+    inReplyTo: thread.messageId,
+    references: thread.references,
+    messages: messages.length ? messages : (mail.messages || []).slice(-6).map(toMsg),
+  };
+}
+
 /** Draft one email (pass to founder, or close-the-loop to the introducer). */
 export async function draftEmail(req: PassDraftRequest): Promise<PassDraftResponse> {
   // Resolve the Attio bundle.
@@ -312,6 +358,9 @@ export async function draftEmail(req: PassDraftRequest): Promise<PassDraftRespon
   return draftClose(attio, company, grain, req);
 }
 
+// Drafting produces the body + recipient + a default (fresh) subject only.
+// Choosing fresh-vs-reply and looking up the thread happens later, at the review
+// step (see the /thread route), so the user can see the thread before sending.
 async function draftPass(
   attio: AttioResolution,
   company: string,
@@ -320,8 +369,7 @@ async function draftPass(
 ): Promise<PassDraftResponse> {
   const recipient = ceoRecipient(attio);
   // Only greet by first name when we actually trust the recipient; otherwise stay
-  // neutral ("Hi there,") so the draft doesn't hard-code a wrong name (the company
-  // name, an email handle) that the user then has to catch.
+  // neutral ("Hi there,") so the draft doesn't hard-code a wrong name.
   const founderFirst = recipient.verified ? firstNameOf(recipient.name || attio.founderName) : "";
 
   const body = await draftPassEmail({
@@ -334,43 +382,13 @@ async function draftPass(
     customInstructions: req.customInstructions,
   });
 
-  const to = recipient.email ? [{ name: recipient.name, email: recipient.email }] : [];
-  let subject = DEFAULT_SUBJECT;
-  let threadId: string | undefined;
-  let inReplyTo: string | undefined;
-  let references: string | undefined;
-  let mode = req.mode;
-
-  if (req.mode === "reply") {
-    const emails = [
-      recipient.email,
-      ...(recipient.candidates.map((c) => c.email) || []),
-    ].filter(Boolean) as string[];
-    const thread = await findLatestThread(emails);
-    if (thread) {
-      threadId = thread.threadId;
-      inReplyTo = thread.messageId;
-      references = thread.references;
-      subject = thread.subject
-        ? /^re:/i.test(thread.subject)
-          ? thread.subject
-          : `Re: ${thread.subject}`
-        : DEFAULT_SUBJECT;
-    } else {
-      mode = "fresh"; // no thread found — fall back to a fresh email
-    }
-  }
-
   const draft: PassEmailDraft = {
     kind: "pass",
-    subject,
-    to,
+    subject: DEFAULT_SUBJECT,
+    to: recipient.email ? [{ name: recipient.name, email: recipient.email }] : [],
     cc: [],
     body,
-    mode,
-    threadId,
-    inReplyTo,
-    references,
+    mode: "fresh",
     grainUrl: grain.url,
   };
   const note = recipient.verified
@@ -407,43 +425,13 @@ async function draftClose(
     customInstructions: req.customInstructions,
   });
 
-  const to = sourceEmail ? [{ name: introducer.name, email: sourceEmail }] : [];
-  // Close-the-loop defaults to replying on the original intro thread.
-  let subject = `Re: Intro to ${company}`;
-  let threadId: string | undefined;
-  let inReplyTo: string | undefined;
-  let references: string | undefined;
-  let mode: "fresh" | "reply" = req.mode;
-
-  if (req.mode === "reply" && sourceEmail) {
-    const thread = await findLatestThread([sourceEmail]);
-    if (thread) {
-      threadId = thread.threadId;
-      inReplyTo = thread.messageId;
-      references = thread.references;
-      subject = thread.subject
-        ? /^re:/i.test(thread.subject)
-          ? thread.subject
-          : `Re: ${thread.subject}`
-        : subject;
-    } else {
-      mode = "fresh";
-      subject = DEFAULT_SUBJECT;
-    }
-  } else if (req.mode === "fresh") {
-    subject = DEFAULT_SUBJECT;
-  }
-
   const draft: PassEmailDraft = {
     kind: "close",
-    subject,
-    to,
+    subject: DEFAULT_SUBJECT,
+    to: sourceEmail ? [{ name: introducer.name, email: sourceEmail }] : [],
     cc: [],
     body,
-    mode,
-    threadId,
-    inReplyTo,
-    references,
+    mode: "fresh",
     grainUrl: grain.url,
   };
   const note = sourceEmail

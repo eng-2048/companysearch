@@ -896,12 +896,25 @@ export interface DealByStatus {
   createdAt?: string;
 }
 
+/** True if a deal_flow entry's owners include the given workspace member. */
+function entryOwnedBy(entry: any, memberId: string): boolean {
+  const owners = entry?.entry_values?.owners;
+  if (!Array.isArray(owners)) return false;
+  return owners.some((o: any) => o?.referenced_actor_id === memberId);
+}
+
 /**
  * All deal_flow entries currently in a given pipeline status (e.g. "To Pass"),
  * newest first. Returns the list entry id (to write status back) and the parent
  * company record id (to resolve the full context). Paginates the whole set.
+ * When ownerId is set, keeps only entries owned by that workspace member (the
+ * whole pipeline is shared, so this scopes To Pass to Zann's own deals).
  */
-export async function listDealsByStatus(status: string, cap = 200): Promise<DealByStatus[]> {
+export async function listDealsByStatus(
+  status: string,
+  cap = 200,
+  ownerId?: string
+): Promise<DealByStatus[]> {
   const out: DealByStatus[] = [];
   let offset = 0;
   while (out.length < cap) {
@@ -918,6 +931,7 @@ export async function listDealsByStatus(status: string, cap = 200): Promise<Deal
     }
     if (!data.length) break;
     for (const e of data) {
+      if (ownerId && !entryOwnedBy(e, ownerId)) continue;
       const entryId = e.id?.entry_id || e.entry_id;
       const rid = e.parent_record_id;
       if (entryId && rid) out.push({ entryId, recordId: rid, createdAt: e.created_at });

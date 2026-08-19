@@ -1,17 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PassFollowUpList,
   PassItem,
   PassEmailDraft,
   PassDraftResponse,
   PassSendResponse,
+  PassThreadPreview,
 } from "@/lib/types";
 
 const REASONS = ["Market size", "Competitive landscape", "Round dynamics", "Generic"];
-
-// Statuses reachable from this screen (current + the moves you'd make here).
 const PFU_STATUSES = ["Pass", "To Pass", "Watch", "Still Thinking"];
 
 function statusClass(status?: string): string {
@@ -25,8 +24,6 @@ function statusClass(status?: string): string {
   return "st-neutral";
 }
 
-/** Editable pipeline status — writes to Attio on select. Calls onPassed when the
- *  deal is moved to "Pass" so the parent can drop the card. */
 function StatusSelect({
   entryId,
   status,
@@ -86,46 +83,55 @@ function StatusSelect({
   );
 }
 
-type AddrList = { name?: string; email: string }[];
+type Addr = { name?: string; email: string };
+const parseCc = (s: string): Addr[] =>
+  s.split(/[,;\s]+/).map((e) => e.trim()).filter((e) => e.includes("@")).map((email) => ({ email }));
 
-const parseCc = (s: string): AddrList =>
-  s
-    .split(/[,;\s]+/)
-    .map((e) => e.trim())
-    .filter((e) => e.includes("@"))
-    .map((email) => ({ email }));
-
-/** One email composer — used for both the pass email and the close-the-loop email.
- *  Generates a draft on demand, then everything (recipient, cc, subject, body) is
- *  editable before an explicit Send. */
+/** One email composer — pass email or close-the-loop. The generic draft loads on
+ *  mount (for the pass email); the refine controls sit BELOW the draft; and
+ *  fresh-vs-reply + thread history are chosen on a review step before sending. */
 function EmailComposer({
   item,
   kind,
   testRecipient,
+  autoLoad,
   onSent,
 }: {
   item: PassItem;
   kind: "pass" | "close";
   testRecipient: string;
+  autoLoad: boolean;
   onSent?: () => void;
 }) {
+  const [phase, setPhase] = useState<"compose" | "review">("compose");
   const [reasons, setReasons] = useState<string[]>([]);
-  const [mode, setMode] = useState<"fresh" | "reply">(kind === "close" ? "reply" : "fresh");
   const [instructions, setInstructions] = useState("");
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<PassEmailDraft | null>(null);
-  // editable fields (initialized from the draft, then user-owned)
   const [toName, setToName] = useState("");
   const [toEmail, setToEmail] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
 
+  const [mode, setMode] = useState<"fresh" | "reply">(kind === "close" ? "reply" : "fresh");
+  const [thread, setThread] = useState<PassThreadPreview | null>(null);
+  const [threadLoading, setThreadLoading] = useState(false);
+
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<PassSendResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (autoLoad && !started.current) {
+      started.current = true;
+      void generate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleReason = (r: string) =>
     setReasons((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
@@ -140,11 +146,9 @@ function EmailComposer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind,
-          // recent rows carry a meeting (better Grain match); To Pass rows use the record
           recordId: item.meeting ? undefined : item.recordId,
           meeting: item.meeting,
           reasons,
-          mode,
           customInstructions: instructions || undefined,
         }),
       });
@@ -156,7 +160,6 @@ function EmailComposer({
         setToEmail(j.draft.to[0]?.email || "");
         setSubject(j.draft.subject);
         setBody(j.draft.body);
-        setMode(j.draft.mode);
       } else {
         setDraft(null);
         setError(j.note || "Couldn't draft this email.");
@@ -167,6 +170,36 @@ function EmailComposer({
       setLoading(false);
     }
   }
+
+  async function loadThread() {
+    setThreadLoading(true);
+    try {
+      const emails = [toEmail, ...(item.recipient.candidates || []).map((c) => c.email)]
+        .filter(Boolean)
+        .join(",");
+      const res = await fetch(`/api/pass-follow-up/thread?emails=${encodeURIComponent(emails)}`);
+      setThread(await res.json());
+    } catch {
+      setThread({ found: false, messages: [] });
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  function goReview() {
+    setError(null);
+    setPhase("review");
+    // Close-the-loop defaults to reply; fetch the intro thread up front.
+    if (mode === "reply" && !thread) void loadThread();
+  }
+
+  function chooseMode(next: "fresh" | "reply") {
+    setMode(next);
+    if (next === "reply" && !thread) void loadThread();
+  }
+
+  const replying = mode === "reply" && thread?.found;
+  const effectiveSubject = replying ? thread!.subject || subject : subject;
 
   async function send() {
     if (!toEmail.includes("@")) {
@@ -190,12 +223,12 @@ function EmailComposer({
           kind,
           to: [{ name: toName || undefined, email: toEmail }],
           cc: parseCc(cc),
-          subject,
+          subject: effectiveSubject,
           body,
           mode,
-          threadId: draft?.threadId,
-          inReplyTo: draft?.inReplyTo,
-          references: draft?.references,
+          threadId: replying ? thread!.threadId : undefined,
+          inReplyTo: replying ? thread!.inReplyTo : undefined,
+          references: replying ? thread!.references : undefined,
           dealFlowEntryId: item.dealFlowEntryId,
           flipStatus: kind === "pass",
         }),
@@ -217,150 +250,225 @@ function EmailComposer({
   const unverified = kind === "pass" && !item.recipient.verified;
   const candidates = item.recipient.candidates || [];
 
-  return (
-    <div className={`composer ${kind}`}>
-      <div className="cmp-controls">
-        <div className="cmp-reasons">
-          <span className="cmp-label">Reason for pass</span>
-          <div className="cmp-checks">
-            {REASONS.map((r) => (
-              <label key={r} className={`fe-check ${reasons.includes(r) ? "on" : ""}`}>
-                <input type="checkbox" checked={reasons.includes(r)} onChange={() => toggleReason(r)} />
-                {r}
-              </label>
-            ))}
-          </div>
+  // ————— close-the-loop: on-demand first draft —————
+  if (!autoLoad && !draft && !loading) {
+    return (
+      <div className={`composer ${kind}`}>
+        {error && <div className="error-box">⚠ {error}</div>}
+        <button className="cmp-gen" onClick={generate} type="button">
+          Draft close-the-loop email
+        </button>
+      </div>
+    );
+  }
+
+  if (loading && !draft) {
+    return (
+      <div className={`composer ${kind}`}>
+        <div className="status-line">
+          <span className="spinner" />
+          <span>Drafting…</span>
         </div>
-        <div className="cmp-mode">
-          <span className="cmp-label">Style</span>
+      </div>
+    );
+  }
+
+  if (!draft) {
+    return (
+      <div className={`composer ${kind}`}>
+        {error && <div className="error-box">⚠ {error}</div>}
+      </div>
+    );
+  }
+
+  // ————— review phase —————
+  if (phase === "review") {
+    return (
+      <div className={`composer ${kind}`}>
+        <div className="cmp-review-head">
+          <button className="cmp-back" onClick={() => setPhase("compose")} type="button">
+            ← Back to edit
+          </button>
+          <span className="cmp-review-title">Review &amp; send</span>
+        </div>
+
+        <div className="cmp-delivery">
+          <span className="cmp-label">Delivery</span>
           <div className="cmp-seg">
-            <button className={mode === "fresh" ? "on" : ""} onClick={() => setMode("fresh")} type="button">
+            <button className={mode === "fresh" ? "on" : ""} onClick={() => chooseMode("fresh")} type="button">
               Fresh email
             </button>
-            <button className={mode === "reply" ? "on" : ""} onClick={() => setMode("reply")} type="button">
+            <button className={mode === "reply" ? "on" : ""} onClick={() => chooseMode("reply")} type="button">
               Reply in thread
             </button>
           </div>
         </div>
+
+        {mode === "reply" && (
+          <div className="cmp-thread">
+            {threadLoading ? (
+              <div className="status-line">
+                <span className="spinner" />
+                <span>Finding the thread…</span>
+              </div>
+            ) : thread?.found ? (
+              <>
+                <div className="cmp-thread-head">
+                  Replying on: <strong>{thread.subject}</strong>
+                </div>
+                {thread.messages.map((m, i) => (
+                  <div className="cmp-thread-msg" key={i}>
+                    <div className="cmp-tm-top">
+                      <span className="cmp-tm-who">{m.who}</span>
+                      <span className="cmp-tm-date">{m.date}</span>
+                    </div>
+                    <div className="cmp-tm-snip">{m.snippet}</div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="cmp-note">No prior thread found — this will send as a fresh email.</div>
+            )}
+          </div>
+        )}
+
+        <div className="cmp-summary">
+          <div className="cmp-srow">
+            <span>To</span>
+            <span>
+              {toName ? `${toName} ` : ""}
+              &lt;{toEmail || "—"}&gt;
+            </span>
+          </div>
+          {parseCc(cc).length > 0 && (
+            <div className="cmp-srow">
+              <span>Cc</span>
+              <span>{parseCc(cc).map((a) => a.email).join(", ")}</span>
+            </div>
+          )}
+          <div className="cmp-srow">
+            <span>Subject</span>
+            <span>{effectiveSubject}</span>
+          </div>
+        </div>
+        <pre className="cmp-preview">{body}</pre>
+
+        {error && <div className="error-box">⚠ {error}</div>}
+
+        <div className="cmp-send-row">
+          <button className="cmp-send" onClick={send} disabled={sending || !!sent} type="button">
+            {sending ? "Sending…" : sent ? "✓ Sent" : `Send test → ${testRecipient}`}
+          </button>
+          {sent && (
+            <span className="cmp-sent">
+              Sent to {sent.actualTo.join(", ")}
+              {sent.testMode ? " (test mode)" : ""}
+              {sent.statusFlipped ? " · marked Pass" : ""}
+            </span>
+          )}
+        </div>
       </div>
+    );
+  }
 
-      <textarea
-        className="fe-textarea cmp-instr"
-        placeholder={
-          kind === "pass"
-            ? "Custom instructions (optional) — anything else the pass email should say or avoid…"
-            : "Custom instructions (optional) — anything else to tell the introducer…"
-        }
-        value={instructions}
-        onChange={(e) => setInstructions(e.target.value)}
-        rows={2}
-      />
-
-      <button className="cmp-gen" onClick={generate} disabled={loading} type="button">
-        {loading ? "Drafting…" : draft ? "↻ Regenerate" : "Draft email"}
-      </button>
-
+  // ————— compose phase: draft on top, refine below —————
+  return (
+    <div className={`composer ${kind}`}>
+      {unverified && (
+        <div className="cmp-warn">
+          ⚠ Recipient not confirmed from Attio — check the name and email before sending.
+        </div>
+      )}
       {note && !error && <div className="cmp-note">{note}</div>}
       {error && <div className="error-box">⚠ {error}</div>}
 
-      {draft && (
-        <div className="cmp-draft">
-          {unverified && (
-            <div className="cmp-warn">
-              ⚠ Recipient not confirmed from Attio — check the name and email before sending.
-            </div>
-          )}
+      <div className="cmp-field">
+        <label>To</label>
+        <div className="cmp-to">
+          <input className="cmp-input name" value={toName} onChange={(e) => setToName(e.target.value)} placeholder="Name" />
+          <input className="cmp-input email" value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="email@company.com" />
+        </div>
+      </div>
 
-          <div className="cmp-field">
-            <label>To</label>
-            <div className="cmp-to">
-              <input
-                className="cmp-input name"
-                value={toName}
-                onChange={(e) => setToName(e.target.value)}
-                placeholder="Name"
-              />
-              <input
-                className="cmp-input email"
-                value={toEmail}
-                onChange={(e) => setToEmail(e.target.value)}
-                placeholder="email@company.com"
-              />
-            </div>
-          </div>
-
-          {candidates.length > 1 && (
-            <div className="cmp-cands">
-              <span>Or pick: </span>
-              {candidates.map((c) => (
-                <button
-                  key={c.email}
-                  type="button"
-                  className="cmp-cand"
-                  onClick={() => {
-                    setToName(c.name);
-                    setToEmail(c.email);
-                  }}
-                >
-                  {c.name} &lt;{c.email}&gt;{c.role ? ` · ${c.role}` : ""}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="cmp-field">
-            <label>Cc</label>
-            <input
-              className="cmp-input"
-              value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              placeholder="Optional — comma-separated emails"
-            />
-          </div>
-
-          <div className="cmp-field">
-            <label>Subject</label>
-            <input className="cmp-input" value={subject} onChange={(e) => setSubject(e.target.value)} />
-          </div>
-
-          <div className="cmp-field">
-            <label>Body</label>
-            <textarea
-              className="fe-textarea cmp-body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={14}
-            />
-          </div>
-
-          {draft.grainUrl && (
-            <a className="cmp-grain" href={draft.grainUrl} target="_blank" rel="noreferrer">
-              Grain call ↗
-            </a>
-          )}
-
-          <div className="cmp-send-row">
-            <button className="cmp-send" onClick={send} disabled={sending || !!sent} type="button">
-              {sending ? "Sending…" : sent ? "✓ Sent" : `Send test → ${testRecipient}`}
+      {candidates.length > 1 && (
+        <div className="cmp-cands">
+          <span>Or pick: </span>
+          {candidates.map((c) => (
+            <button
+              key={c.email}
+              type="button"
+              className="cmp-cand"
+              onClick={() => {
+                setToName(c.name);
+                setToEmail(c.email);
+              }}
+            >
+              {c.name} &lt;{c.email}&gt;{c.role ? ` · ${c.role}` : ""}
             </button>
-            {sent && (
-              <span className="cmp-sent">
-                Sent to {sent.actualTo.join(", ")}
-                {sent.testMode ? " (test mode)" : ""}
-                {sent.statusFlipped ? " · marked Pass" : ""}
-              </span>
-            )}
-          </div>
+          ))}
         </div>
       )}
+
+      <div className="cmp-field">
+        <label>Cc</label>
+        <input className="cmp-input" value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Optional — comma-separated emails" />
+      </div>
+
+      <div className="cmp-field">
+        <label>Subject</label>
+        <input className="cmp-input" value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </div>
+
+      <div className="cmp-field">
+        <label>Body</label>
+        <textarea className="fe-textarea cmp-body" value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
+      </div>
+
+      {draft.grainUrl && (
+        <a className="cmp-grain" href={draft.grainUrl} target="_blank" rel="noreferrer">
+          Grain call ↗
+        </a>
+      )}
+
+      {/* Refine section, below the draft */}
+      <div className="cmp-refine">
+        <span className="cmp-label">Refine this draft</span>
+        <div className="cmp-checks">
+          {REASONS.map((r) => (
+            <label key={r} className={`fe-check ${reasons.includes(r) ? "on" : ""}`}>
+              <input type="checkbox" checked={reasons.includes(r)} onChange={() => toggleReason(r)} />
+              {r}
+            </label>
+          ))}
+        </div>
+        <textarea
+          className="fe-textarea cmp-instr"
+          placeholder={
+            kind === "pass"
+              ? "Custom instructions (optional) — e.g. mention we loved the demo, keep it short, add a specific reason…"
+              : "Custom instructions (optional) — anything else to tell the introducer…"
+          }
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          rows={2}
+        />
+        <button className="cmp-gen" onClick={generate} disabled={loading} type="button">
+          {loading ? "Redrafting…" : "↻ Regenerate with these"}
+        </button>
+      </div>
+
+      <div className="cmp-send-row">
+        <button className="cmp-review-btn" onClick={goReview} type="button">
+          Review &amp; send →
+        </button>
+      </div>
     </div>
   );
 }
 
 function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: string }) {
-  const [open, setOpen] = useState<"none" | "pass" | "close">("none");
+  const [open, setOpen] = useState(false);
   const [removed, setRemoved] = useState(false);
-
   if (removed) return null;
 
   const founderLine = item.founder && !item.company.includes(item.founder) ? ` · ${item.founder}` : "";
@@ -401,22 +509,9 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
       {item.description && <div className="pfu-desc">{item.description}</div>}
 
       <div className="pfu-actions">
-        <button
-          className={`pfu-btn ${open === "pass" ? "on" : ""}`}
-          onClick={() => setOpen(open === "pass" ? "none" : "pass")}
-          type="button"
-        >
-          {open === "pass" ? "Hide pass email" : "Draft pass email"}
+        <button className={`pfu-btn ${open ? "on" : ""}`} onClick={() => setOpen(!open)} type="button">
+          {open ? "Hide email" : "Draft pass email"}
         </button>
-        {item.closeLoopEligible && (
-          <button
-            className={`pfu-btn ghost ${open === "close" ? "on" : ""}`}
-            onClick={() => setOpen(open === "close" ? "none" : "close")}
-            type="button"
-          >
-            {open === "close" ? "Hide close-the-loop" : "Close the loop?"}
-          </button>
-        )}
         {item.attioUrl && (
           <a className="pfu-link" href={item.attioUrl} target="_blank" rel="noreferrer">
             Attio ↗
@@ -424,10 +519,32 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
         )}
       </div>
 
-      {open === "pass" && (
-        <EmailComposer item={item} kind="pass" testRecipient={testRecipient} onSent={() => setRemoved(true)} />
+      {open && (
+        <div className="pfu-workspace">
+          <EmailComposer
+            item={item}
+            kind="pass"
+            testRecipient={testRecipient}
+            autoLoad
+            onSent={() => setRemoved(true)}
+          />
+
+          {item.closeLoopEligible && (
+            <div className="pfu-cl">
+              <div className="pfu-cl-head">
+                Close the loop
+                {item.introducer && (
+                  <span className="pfu-cl-sub">
+                    with {item.introducer.name}
+                    {item.introducer.type ? ` (${item.introducer.type})` : ""}
+                  </span>
+                )}
+              </div>
+              <EmailComposer item={item} kind="close" testRecipient={testRecipient} autoLoad={false} />
+            </div>
+          )}
+        </div>
       )}
-      {open === "close" && <EmailComposer item={item} kind="close" testRecipient={testRecipient} />}
     </div>
   );
 }
@@ -485,7 +602,7 @@ export default function PassFollowUp({
       {loading && !data && (
         <div className="status-line">
           <span className="spinner" />
-          <span>Pulling To Pass deals and recent meetings…</span>
+          <span>Pulling your To Pass deals and recent meetings…</span>
         </div>
       )}
 
@@ -505,11 +622,9 @@ export default function PassFollowUp({
               </span>
             </div>
             {data.toPass.length === 0 ? (
-              <div className="pfu-empty">Nothing queued to pass.</div>
+              <div className="pfu-empty">Nothing of yours queued to pass.</div>
             ) : (
-              data.toPass.map((it) => (
-                <PassCard key={it.recordId} item={it} testRecipient={testRecipient} />
-              ))
+              data.toPass.map((it) => <PassCard key={it.recordId} item={it} testRecipient={testRecipient} />)
             )}
           </div>
 
@@ -521,9 +636,7 @@ export default function PassFollowUp({
             {data.recent.length === 0 ? (
               <div className="pfu-empty">No other recent meetings.</div>
             ) : (
-              data.recent.map((it) => (
-                <PassCard key={it.recordId} item={it} testRecipient={testRecipient} />
-              ))
+              data.recent.map((it) => <PassCard key={it.recordId} item={it} testRecipient={testRecipient} />)
             )}
           </div>
         </>

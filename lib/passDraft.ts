@@ -166,12 +166,13 @@ export interface PassDraftInput {
 export async function draftPassEmail(input: PassDraftInput): Promise<string> {
   const fallback = fillGenericPass(input.founderFirstName);
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return fallback;
 
+  // The pre-loaded default is the plain generic template. Only tailor with the
+  // call (specific sticking points) once Zann picks a real reason or gives
+  // instructions — so the initial draft is never invented and loads instantly.
   const hasSubstance =
-    input.reasons.some((r) => r !== "Generic") ||
-    (input.callPoints && input.callPoints.length > 0) ||
-    !!input.transcript;
+    input.reasons.some((r) => r !== "Generic") || !!input.customInstructions?.trim();
+  if (!key || !hasSubstance) return fallback;
 
   const reasonLines = input.reasons
     .map((r) => `- ${r}: ${REASON_GUIDE[r] || r}`)
@@ -190,9 +191,7 @@ export async function draftPassEmail(input: PassDraftInput): Promise<string> {
       : "",
     input.transcript ? `Call transcript (for grounding specifics only):\n${input.transcript.slice(0, 12000)}` : "",
     "",
-    hasSubstance
-      ? "Draft the pass email now. Weave in one to three specific, honest sticking points grounded in the call and tied to the reason(s)."
-      : "Draft the pass email now. There are no specific reasons, so stay close to the base template and do not invent a hard reason.",
+    "Draft the pass email now. Weave in one to three specific, honest sticking points grounded in the call and tied to the reason(s) and instructions, in Zann's humble, warm voice.",
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -214,7 +213,10 @@ export interface CloseLoopInput {
 export async function draftCloseLoop(input: CloseLoopInput): Promise<string> {
   const fallback = fillCloseLoop(input.sourceFirstName, input.founderName, input.company);
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return fallback;
+  // Generic close-the-loop template by default; tailor only on reasons/instructions.
+  const hasSubstance =
+    input.reasons.some((r) => r !== "Generic") || !!input.customInstructions?.trim();
+  if (!key || !hasSubstance) return fallback;
 
   const user = [
     `Company: ${input.company}`,
