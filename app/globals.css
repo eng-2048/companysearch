@@ -1470,3 +1470,40 @@ a:hover {
   color-scheme: dark;
   max-width: 220px;
 }
+
+/* Follow-up date inline picker (shown when a deal is moved to Watch) */
+.fu-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+}
+.fu-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--amber);
+}
+.fu-date input[type="date"] {
+  color-scheme: dark;
+  background: var(--bg);
+  border: 1px solid var(--amber);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-family: var(--sans);
+}
+
+/* Prior-outreach warning (an email was already sent to this founder) */
+.cmp-prior {
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid var(--red);
+  color: #fecaca;
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  line-height: 1.45;
+}
+.cmp-prior strong { color: #fff; }

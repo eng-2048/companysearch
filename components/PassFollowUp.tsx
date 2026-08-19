@@ -8,80 +8,12 @@ import {
   PassDraftResponse,
   PassSendResponse,
   PassThreadPreview,
+  PriorOutreach,
 } from "@/lib/types";
+import StatusSelect, { statusClass } from "@/components/StatusSelect";
 
 const REASONS = ["Market size", "Competitive landscape", "Round dynamics", "Generic"];
 const PFU_STATUSES = ["Pass", "To Pass", "Watch", "Still Thinking"];
-
-function statusClass(status?: string): string {
-  if (!status) return "st-neutral";
-  const s = status.toLowerCase();
-  if (s.includes("pass") || s.includes("lost")) return "st-red";
-  if (s.includes("watch")) return "st-orange";
-  if (s.includes("termsheet") || s.includes("closing") || s.includes("closed")) return "st-blue";
-  if (s.includes("new") || s.includes("screen") || s.includes("deep dive") || s.includes("diligence"))
-    return "st-green";
-  return "st-neutral";
-}
-
-function StatusSelect({
-  entryId,
-  status,
-  onChanged,
-}: {
-  entryId: string;
-  status: string;
-  onChanged?: (next: string) => void;
-}) {
-  const [value, setValue] = useState(status);
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-
-  async function change(next: string) {
-    if (next === value) return;
-    const prev = value;
-    setValue(next);
-    setState("saving");
-    try {
-      const res = await fetch("/api/update-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entryId, status: next }),
-      });
-      const j = await res.json();
-      if (!j.ok) throw new Error();
-      setState("saved");
-      setTimeout(() => setState("idle"), 1500);
-      onChanged?.(next);
-    } catch {
-      setValue(prev);
-      setState("error");
-      setTimeout(() => setState("idle"), 2500);
-    }
-  }
-
-  const opts = value ? [value, ...PFU_STATUSES.filter((s) => s !== value)] : PFU_STATUSES;
-  return (
-    <span className="status-edit">
-      <select
-        className={`pill status-select ${statusClass(value)}`}
-        value={value}
-        onChange={(e) => change(e.target.value)}
-        disabled={state === "saving"}
-        title="Change pipeline status — writes to Attio"
-      >
-        {!value && <option value="">— set status —</option>}
-        {opts.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-      {state === "saving" && <span className="save-ind">saving…</span>}
-      {state === "saved" && <span className="save-ind ok">✓ saved</span>}
-      {state === "error" && <span className="save-ind err">! failed</span>}
-    </span>
-  );
-}
 
 type Addr = { name?: string; email: string };
 const parseCc = (s: string): Addr[] =>
@@ -114,6 +46,7 @@ function EmailComposer({
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [prior, setPrior] = useState<PriorOutreach | null>(null);
 
   const [draft, setDraft] = useState<PassEmailDraft | null>(null);
   const [toName, setToName] = useState("");
@@ -159,6 +92,7 @@ function EmailComposer({
       });
       const j: PassDraftResponse = await res.json();
       setNote(j.note || null);
+      setPrior(j.priorOutreach || null);
       if (j.ok && j.draft) {
         setDraft(j.draft);
         setToName(j.draft.to[0]?.name || "");
@@ -218,8 +152,12 @@ function EmailComposer({
         : kind === "watch" && item.dealFlowEntryId
           ? `\n\nThe deal will be marked "Watch" with a follow-up date of ${followUpDate}.`
           : "";
+    const priorWarn = prior
+      ? `⚠ A ${prior.kind === "outreach" ? "prior" : prior.kind} email was already sent to this founder by ${prior.who} on ${prior.date} ("${prior.subject}").\n\n`
+      : "";
     const ok = window.confirm(
-      `Send this ${label} email?\n\n` +
+      priorWarn +
+        `Send this ${label} email?\n\n` +
         `TEST MODE: it will actually go to ${testRecipient} (not ${toEmail}).` +
         afterEffect
     );
@@ -263,6 +201,20 @@ function EmailComposer({
   const unverified = (kind === "pass" || kind === "watch") && !item.recipient.verified;
   const candidates = item.recipient.candidates || [];
 
+  const priorBanner = prior ? (
+    <div className="cmp-prior">
+      ⚠{" "}
+      {prior.kind === "pass"
+        ? "A pass email"
+        : prior.kind === "watch"
+          ? "A watch email"
+          : "An email"}{" "}
+      was already sent to this founder by <strong>{prior.who}</strong>
+      {prior.date ? ` on ${prior.date}` : ""}
+      {prior.subject ? ` — “${prior.subject}”` : ""}. Double-check before sending.
+    </div>
+  ) : null;
+
   // ————— close-the-loop: on-demand first draft —————
   if (!autoLoad && !draft && !loading) {
     return (
@@ -304,6 +256,8 @@ function EmailComposer({
           </button>
           <span className="cmp-review-title">Review &amp; send</span>
         </div>
+
+        {priorBanner}
 
         <div className="cmp-delivery">
           <span className="cmp-label">Delivery</span>
@@ -387,6 +341,7 @@ function EmailComposer({
   // ————— compose phase: draft on top, refine below —————
   return (
     <div className={`composer ${kind}`}>
+      {priorBanner}
       {unverified && (
         <div className="cmp-warn">
           ⚠ Recipient not confirmed from Attio — check the name and email before sending.
@@ -527,6 +482,7 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
             <StatusSelect
               entryId={item.dealFlowEntryId}
               status={item.status || ""}
+              forwardStatuses={PFU_STATUSES}
               onChanged={(next) => {
                 if (next.toLowerCase() === "pass") setRemoved(true);
               }}
@@ -558,14 +514,14 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
               onClick={() => setEmailType("pass")}
               type="button"
             >
-              Pass email
+              Pass
             </button>
             <button
               className={emailType === "watch" ? "on" : ""}
               onClick={() => setEmailType("watch")}
               type="button"
             >
-              Watch — keep in touch
+              Watch
             </button>
           </div>
 

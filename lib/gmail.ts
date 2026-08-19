@@ -4,6 +4,7 @@
 // Native Gmail — not Attio — so the same connection can later draft/send.
 
 import { accessToken, calendarConfigured } from "./gcal";
+import { PriorOutreach } from "./types";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const MAX_MESSAGES = 20;
@@ -260,6 +261,100 @@ export async function sendGmail(input: SendInput): Promise<SendResult> {
     id: j.id,
     threadId: j.threadId,
   };
+}
+
+// ————————————————————————————————————————————————————————————————
+// Prior-outreach detection — before composing/sending, look through the mailbox
+// for an email a 2048 teammate already sent this founder (a pass, a watch/keep-in-
+// touch, or any outreach), so we never double-send and can surface "already sent".
+// ————————————————————————————————————————————————————————————————
+
+const b64urlDecode = (data: string): string => {
+  try {
+    return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+  } catch {
+    return "";
+  }
+};
+
+/** Extract readable text from a Gmail message payload (prefers text/plain). */
+function extractText(payload: any): string {
+  if (!payload) return "";
+  if (payload.mimeType === "text/plain" && payload.body?.data) return b64urlDecode(payload.body.data);
+  if (Array.isArray(payload.parts)) {
+    const plain = payload.parts.find((p: any) => p.mimeType === "text/plain" && p.body?.data);
+    if (plain) return b64urlDecode(plain.body.data);
+    // fall back to HTML, stripped of tags
+    const html = payload.parts.find((p: any) => p.mimeType === "text/html" && p.body?.data);
+    if (html) return b64urlDecode(html.body.data).replace(/<[^>]+>/g, " ");
+    for (const p of payload.parts) {
+      const t = extractText(p);
+      if (t) return t;
+    }
+  }
+  if (payload.body?.data) return b64urlDecode(payload.body.data).replace(/<[^>]+>/g, " ");
+  return "";
+}
+
+const PASS_RE =
+  /won'?t be a fit|not a fit|isn'?t a fit|not the right fit|decided (not to|to pass|this won)|pass on this|won'?t be moving forward|won'?t be a match|not moving forward with an investment|didn'?t get there on an investment/i;
+const WATCH_RE =
+  /keep in touch|stay close|stay in touch|staying in touch|not in a position to move forward|circle back|love to follow|keep me posted|check back in/i;
+
+/**
+ * The most recent email a 2048 address sent to this founder, classified as a pass,
+ * a watch, or generic outreach. Returns null if none found. Searches the connected
+ * mailbox (catches your own sends and any thread you're on — including a teammate's
+ * message when you were cc'd).
+ */
+export async function scanPriorOutreach(emails: string[]): Promise<PriorOutreach | null> {
+  const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))];
+  if (!calendarConfigured() || clean.length === 0) return null;
+  const token = await accessToken();
+
+  const to = clean.map((e) => `to:${e}`).join(" OR ");
+  const q = `(${to}) from:2048.vc`;
+  let ids: string[] = [];
+  try {
+    const list = await apiGet(`/messages?q=${encodeURIComponent(q)}&maxResults=8`, token);
+    ids = (list.messages || []).map((m: any) => m.id);
+  } catch {
+    return null;
+  }
+  if (!ids.length) return null;
+
+  // Newest first: fetch full message, classify by subject + body.
+  const msgs = await Promise.all(
+    ids.map((id) => apiGet(`/messages/${id}?format=full`, token).catch(() => null))
+  );
+  const scored = msgs
+    .filter(Boolean)
+    .map((m: any) => {
+      const hs = m.payload?.headers || [];
+      const from = splitFrom(header(hs, "From"));
+      const subject = header(hs, "Subject") || "(no subject)";
+      const dateMs = Number(m.internalDate) || Date.parse(header(hs, "Date")) || 0;
+      const text = `${subject}\n${extractText(m.payload)}`;
+      const kind: PriorOutreach["kind"] = PASS_RE.test(text)
+        ? "pass"
+        : WATCH_RE.test(text)
+          ? "watch"
+          : "outreach";
+      return {
+        kind,
+        who: from.name || from.email || "a teammate",
+        date: dateMs ? new Date(dateMs).toISOString().slice(0, 10) : "",
+        subject,
+        ms: dateMs,
+      };
+    })
+    .sort((a, b) => b.ms - a.ms);
+
+  // Only warn about a PASS or WATCH already sent — generic prior outreach
+  // (scheduling, intros) is normal and shouldn't raise an alarm.
+  const decisive = scored.find((s) => s.kind === "pass" || s.kind === "watch");
+  if (!decisive) return null;
+  return { kind: decisive.kind, who: decisive.who, date: decisive.date, subject: decisive.subject };
 }
 
 export async function resolveEmail(emails: string[]): Promise<EmailResolution> {

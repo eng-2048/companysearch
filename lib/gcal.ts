@@ -188,20 +188,35 @@ export async function listPrimaryWindow(
   if (!calendarConfigured()) return [];
   const token = await accessToken();
   const now = Date.now();
-  const params = new URLSearchParams({
-    timeMin: new Date(now - daysBack * 864e5).toISOString(),
-    timeMax: new Date(now + daysForward * 864e5).toISOString(),
-    singleEvents: "true",
-    orderBy: "startTime",
-    maxResults: "50",
-  });
-  const res = await fetch(`${CAL_BASE}/calendars/primary/events?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const json = await res.json();
-  return (json.items || []).map((raw: any) => parseEvent(raw, now));
+  const timeMin = new Date(now - daysBack * 864e5).toISOString();
+  const timeMax = new Date(now + daysForward * 864e5).toISOString();
+
+  // A busy personal calendar (workouts, holds, internal blocks) easily exceeds a
+  // single page over a 10-day window, and events are returned oldest-first — so a
+  // fixed cap silently drops the NEWEST meetings (the ones we most want). Page
+  // through the whole window instead (bounded so a runaway can't hang).
+  const events: GCalEvent[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 6; page++) {
+    const params = new URLSearchParams({
+      timeMin,
+      timeMax,
+      singleEvents: "true",
+      orderBy: "startTime",
+      maxResults: "250",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await fetch(`${CAL_BASE}/calendars/primary/events?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) break;
+    const json = await res.json();
+    for (const raw of json.items || []) events.push(parseEvent(raw, now));
+    pageToken = json.nextPageToken;
+    if (!pageToken) break;
+  }
+  return events;
 }
 
 /**

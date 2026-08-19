@@ -27,6 +27,7 @@ import {
   senderEmail,
   findLatestThread,
   resolveEmail,
+  scanPriorOutreach,
 } from "./gmail";
 import {
   PassFollowUpList,
@@ -450,9 +451,29 @@ export async function draftEmail(req: PassDraftRequest): Promise<PassDraftRespon
   const company = cleanName(attio.featuredCompany.name);
   const grain = await grainFor(attio, req.meeting);
 
-  if (req.kind === "close") return draftClose(attio, company, grain, req);
-  if (req.kind === "watch") return draftWatch(attio, company, grain, req);
-  return draftPass(attio, company, grain, req);
+  const res =
+    req.kind === "close"
+      ? await draftClose(attio, company, grain, req)
+      : req.kind === "watch"
+        ? await draftWatch(attio, company, grain, req)
+        : await draftPass(attio, company, grain, req);
+
+  // Look through the mailbox for an email a 2048 address already sent this founder
+  // (a pass/watch someone — even a teammate — may have sent manually), so the UI
+  // can warn before double-sending.
+  if (res.ok && res.draft) {
+    const scanEmails =
+      req.kind === "close"
+        ? res.draft.to.map((a) => a.email).filter(Boolean)
+        : [...res.draft.to.map((a) => a.email), ...(attio.emails || [])].filter(Boolean);
+    try {
+      const prior = await scanPriorOutreach(scanEmails);
+      if (prior) res.priorOutreach = prior;
+    } catch {
+      /* mailbox scan is best-effort */
+    }
+  }
+  return res;
 }
 
 // Drafting produces the body + recipient + a default (fresh) subject only.

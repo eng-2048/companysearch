@@ -1,20 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { to12h } from "@/lib/match";
-
-function statusClass(status?: string): string {
-  if (!status) return "st-neutral";
-  const s = status.toLowerCase();
-  if (s.includes("pass") || s.includes("lost")) return "st-red";
-  if (s.includes("watch")) return "st-orange";
-  if (s.includes("termsheet") || s.includes("term sheet") || s.includes("closing") || s.includes("closed"))
-    return "st-blue";
-  if (s.includes("new") || s.includes("screen") || s.includes("deep dive") || s.includes("diligence"))
-    return "st-green";
-  return "st-neutral";
-}
+import StatusSelect, { statusClass } from "@/components/StatusSelect";
 
 const LINK_LABELS: [keyof PrepLinks, string][] = [
   ["deck", "Deck"],
@@ -26,63 +14,9 @@ const LINK_LABELS: [keyof PrepLinks, string][] = [
   ["attioRecord", "Attio Record"],
 ];
 
-// The only moves you make from a prep screen: keep the current status, or bump it
-// forward. Exact Attio titles (a wrong title fails the write).
-const FORWARD_STATUSES = ["1st Screen", "Deep Dive", "Diligence"];
-
-/** Editable pipeline status — writes the change back to Attio on select. */
-function StatusSelect({ entryId, status }: { entryId: string; status: string }) {
-  const [value, setValue] = useState(status);
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-
-  async function change(next: string) {
-    if (next === value) return;
-    const prev = value;
-    setValue(next);
-    setState("saving");
-    try {
-      const res = await fetch("/api/update-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entryId, status: next }),
-      });
-      const j = await res.json();
-      if (!j.ok) throw new Error();
-      setState("saved");
-      setTimeout(() => setState("idle"), 1500);
-    } catch {
-      setValue(prev); // revert on failure
-      setState("error");
-      setTimeout(() => setState("idle"), 2500);
-    }
-  }
-
-  // Current status (whatever it is) + the three forward moves, deduped.
-  const opts = value
-    ? [value, ...FORWARD_STATUSES.filter((s) => s !== value)]
-    : FORWARD_STATUSES;
-  return (
-    <span className="status-edit">
-      <select
-        className={`pill status-select ${statusClass(value)}`}
-        value={value}
-        onChange={(e) => change(e.target.value)}
-        disabled={state === "saving"}
-        title="Change pipeline status — writes to Attio"
-      >
-        {!value && <option value="">— set status —</option>}
-        {opts.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-      {state === "saving" && <span className="save-ind">saving…</span>}
-      {state === "saved" && <span className="save-ind ok">✓ saved</span>}
-      {state === "error" && <span className="save-ind err">! failed</span>}
-    </span>
-  );
-}
+// The moves you make from a prep screen: keep the current status, bump it forward,
+// or move it to Watch (which prompts for a follow-up date). Exact Attio titles.
+const FORWARD_STATUSES = ["1st Screen", "Deep Dive", "Diligence", "Watch"];
 
 function PrepCard({ m }: { m: PrepEntry }) {
   const links = LINK_LABELS.filter(([k]) => m.links[k]);
@@ -99,7 +33,11 @@ function PrepCard({ m }: { m: PrepEntry }) {
             {m.founder && !m.company.includes(m.founder) ? ` · ${m.founder}` : ""}
           </h3>
           {m.dealFlowEntryId ? (
-            <StatusSelect entryId={m.dealFlowEntryId} status={m.status || ""} />
+            <StatusSelect
+              entryId={m.dealFlowEntryId}
+              status={m.status || ""}
+              forwardStatuses={FORWARD_STATUSES}
+            />
           ) : (
             m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>
           )}

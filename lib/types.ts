@@ -299,10 +299,20 @@ export interface PassEmailDraft {
   grainUrl?: string;
 }
 
+/** An email a 2048 address already sent this founder — surfaced so we never
+ *  double-send a pass/watch (even one a teammate sent manually). */
+export interface PriorOutreach {
+  kind: "pass" | "watch" | "outreach";
+  who: string;
+  date: string;
+  subject: string;
+}
+
 export interface PassDraftResponse {
   ok: boolean;
   note?: string;
   draft?: PassEmailDraft;
+  priorOutreach?: PriorOutreach;
 }
 
 export interface PassThreadMessage {
