@@ -80,7 +80,7 @@ function nameFromEmailLocal(email?: string): string | undefined {
 }
 
 /** Resolve a meeting to its Attio record, same priority order as Meeting Prep. */
-async function resolveToAttio(
+export async function resolveToAttio(
   m: DayMeeting
 ): Promise<{ attio: AttioResolution; attendeeName?: string } | null> {
   const externals = m.attendees.filter((a) => {
@@ -124,7 +124,7 @@ async function resolveToAttio(
   return attio ? { attio, attendeeName } : null;
 }
 
-const externalAttendees = (m: DayMeeting) =>
+export const externalAttendees = (m: DayMeeting) =>
   m.attendees.filter((a) => {
     const dom = (a.email || "").split("@")[1]?.toLowerCase();
     return dom && dom !== INTERNAL_DOMAIN;
@@ -133,7 +133,7 @@ const externalAttendees = (m: DayMeeting) =>
 const daysApart = (a: string, b: string): number =>
   Math.abs((Date.parse(a + "T00:00:00") - Date.parse(b + "T00:00:00")) / 864e5);
 
-interface GrainMatch {
+export interface GrainMatch {
   url?: string;
   points: string[]; // the call's summary bullets, for seeding Other Notes
   transcript?: string; // full transcript, for equity extraction
@@ -143,7 +143,7 @@ interface GrainMatch {
  *  1st_meeting_recording field). Match by attendee email, then meeting date,
  *  then fall back to the most recent recording for the company. Returns the
  *  share url and the call's summary points. */
-async function findGrainMatch(
+export async function findGrainMatch(
   attio: AttioResolution,
   m: DayMeeting,
   emailHints: string[],

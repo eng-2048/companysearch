@@ -247,6 +247,8 @@ export interface DealFlow {
   introDByType?: string;
   introDById?: { object: string; recordId: string };
   introDByName?: string;
+  introDByEmail?: string;
+  introDByIsPerson?: boolean;
   verticals?: string;
   location?: string;
   dateFounded?: string;
@@ -631,6 +633,12 @@ export async function resolveEntity(
     if (dealFlow.introDById) {
       const rec = await getRecord(dealFlow.introDById.object, dealFlow.introDById.recordId);
       if (rec) dealFlow.introDByName = recordName(rec);
+      // Is the introducer a real person (→ close-the-loop eligible) and what's
+      // their email? A channel stand-in ("List", "LinkedIn") is a companies-object
+      // record, not a person.
+      const obj = String(dealFlow.introDById.object);
+      dealFlow.introDByIsPerson = obj === PEOPLE_OBJECT || /people/i.test(obj);
+      if (rec && dealFlow.introDByIsPerson) dealFlow.introDByEmail = recordEmails(rec)[0];
     }
   }
 
@@ -880,4 +888,53 @@ export async function findCandidates(
   // Deals first, then by name-match strength.
   out.sort((a, b) => Number(b.hasDeal) - Number(a.hasDeal));
   return out;
+}
+
+export interface DealByStatus {
+  entryId: string;
+  recordId: string; // parent company record
+  createdAt?: string;
+}
+
+/**
+ * All deal_flow entries currently in a given pipeline status (e.g. "To Pass"),
+ * newest first. Returns the list entry id (to write status back) and the parent
+ * company record id (to resolve the full context). Paginates the whole set.
+ */
+export async function listDealsByStatus(status: string, cap = 200): Promise<DealByStatus[]> {
+  const out: DealByStatus[] = [];
+  let offset = 0;
+  while (out.length < cap) {
+    let data: any[] = [];
+    try {
+      const r = await api(`/lists/${DEAL_FLOW_SLUG}/entries/query`, {
+        filter: { status },
+        limit: 50,
+        offset,
+      });
+      data = r.data || [];
+    } catch {
+      break;
+    }
+    if (!data.length) break;
+    for (const e of data) {
+      const entryId = e.id?.entry_id || e.entry_id;
+      const rid = e.parent_record_id;
+      if (entryId && rid) out.push({ entryId, recordId: rid, createdAt: e.created_at });
+    }
+    if (data.length < 50) break;
+    offset += 50;
+  }
+  return out;
+}
+
+/** Name + first email for a single person record (the introducer, resolved for
+ *  the close-the-loop email). Returns undefined fields when the record or email
+ *  is missing. */
+export async function getPersonContact(
+  recordIdStr: string
+): Promise<{ name?: string; email?: string }> {
+  const rec = await getRecord(PEOPLE_OBJECT, recordIdStr);
+  if (!rec) return {};
+  return { name: recordName(rec), email: recordEmails(rec)[0] };
 }

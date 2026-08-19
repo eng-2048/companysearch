@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ContextBundle, SearchEvent, PrepResult, FormEntryList, SearchCandidate } from "@/lib/types";
+import { ContextBundle, SearchEvent, PrepResult, FormEntryList, PassFollowUpList, SearchCandidate } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
 import MeetingPrep from "@/components/MeetingPrep";
 import FormEntry from "@/components/FormEntry";
+import PassFollowUp from "@/components/PassFollowUp";
 
 interface Suggestion {
   term: string;
@@ -46,11 +47,15 @@ export default function Home() {
   const [formMode, setFormMode] = useState(false);
   const [formData, setFormData] = useState<FormEntryList | null>(null);
   const [formLoading, setFormLoading] = useState(false);
+  const [passMode, setPassMode] = useState(false);
+  const [passData, setPassData] = useState<PassFollowUpList | null>(null);
+  const [passLoading, setPassLoading] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   async function openPrep(force = false) {
     setFormMode(false);
+    setPassMode(false);
     setPrepMode(true);
     // Reuse this session's scan when navigating back — no refetch. The server
     // also day-caches, so even a fresh load / reload is instant after the first.
@@ -69,6 +74,7 @@ export default function Home() {
 
   async function openForm(force = false) {
     setPrepMode(false);
+    setPassMode(false);
     setFormMode(true);
     // Reuse this session's list (and any drafted cards) — no refetch on return.
     if (!force && formData) return;
@@ -81,6 +87,24 @@ export default function Home() {
       setFormData({ configured: false, meetings: [] });
     } finally {
       setFormLoading(false);
+    }
+  }
+
+  async function openPass(force = false) {
+    setPrepMode(false);
+    setFormMode(false);
+    setPassMode(true);
+    // Reuse this session's list (and any in-progress drafts) — no refetch on return.
+    if (!force && passData) return;
+    setPassLoading(true);
+    if (!force) setPassData(null);
+    try {
+      const res = await fetch(`/api/pass-follow-up${force ? "?refresh=1" : ""}`);
+      setPassData(await res.json());
+    } catch {
+      setPassData({ configured: false, testMode: true, testRecipient: "zannali@gmail.com", toPass: [], recent: [] });
+    } finally {
+      setPassLoading(false);
     }
   }
 
@@ -186,6 +210,9 @@ export default function Home() {
           <button className="prep-btn" onClick={() => openForm()}>
             Form Entry
           </button>
+          <button className="prep-btn" onClick={() => openPass()}>
+            Pass / Follow-Up
+          </button>
         </div>
       </div>
       <p className="subtitle">
@@ -201,9 +228,9 @@ export default function Home() {
         />
       ) : (
         <>
-        {/* Form Entry stays mounted (just hidden) so drafted cards + edits
-            survive navigating back to Search. */}
-        <div hidden={formMode}>
+        {/* Form Entry and Pass/Follow-Up stay mounted (just hidden) so drafted
+            cards + edits survive navigating back to Search. */}
+        <div hidden={formMode || passMode}>
       <form
         className="searchbar"
         onSubmit={(e) => {
@@ -298,6 +325,14 @@ export default function Home() {
             loading={formLoading}
             onRefresh={() => openForm(true)}
             onClose={() => setFormMode(false)}
+          />
+        </div>
+        <div hidden={!passMode}>
+          <PassFollowUp
+            data={passData}
+            loading={passLoading}
+            onRefresh={() => openPass(true)}
+            onClose={() => setPassMode(false)}
           />
         </div>
         </>

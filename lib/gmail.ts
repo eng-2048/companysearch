@@ -54,6 +54,214 @@ async function apiGet(path: string, token: string): Promise<any> {
   return res.json();
 }
 
+// ————————————————————————————————————————————————————————————————
+// Sending (gmail.compose scope). SAFETY: while EMAIL_TEST_MODE is true, EVERY
+// outbound message is hard-clamped to TEST_RECIPIENT and all other recipients
+// (cc/bcc) are stripped, so no real founder or introducer can be emailed during
+// testing. The intended recipients are preserved for display and written into a
+// banner at the top of the body. This is the single choke point for all sends —
+// nothing else in the app calls the Gmail send API.
+// ————————————————————————————————————————————————————————————————
+export const EMAIL_TEST_MODE = true;
+export const TEST_RECIPIENT = "zannali@gmail.com";
+
+let cachedProfileEmail: string | null = null;
+/** The account we send AS (the OAuth account — zann@2048.vc). */
+export async function senderEmail(): Promise<string> {
+  if (cachedProfileEmail) return cachedProfileEmail;
+  const token = await accessToken();
+  const p = await apiGet("/profile", token);
+  cachedProfileEmail = p.emailAddress;
+  return cachedProfileEmail!;
+}
+
+export interface ThreadRef {
+  threadId: string;
+  messageId?: string; // RFC822 Message-ID of the last message (for In-Reply-To)
+  references?: string; // accumulated References header
+  subject?: string; // subject of the thread (to build "Re: …")
+}
+
+/** The most recent email thread involving any of these addresses — used to reply
+ *  in-thread (a pass follow-up, or the intro thread for close-the-loop). */
+export async function findLatestThread(emails: string[]): Promise<ThreadRef | null> {
+  const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (!calendarConfigured() || clean.length === 0) return null;
+  const token = await accessToken();
+  const q = clean.map((e) => `from:${e} OR to:${e}`).join(" OR ");
+  let list: any;
+  try {
+    list = await apiGet(`/messages?q=${encodeURIComponent(q)}&maxResults=10`, token);
+  } catch {
+    return null;
+  }
+  const msgs = list.messages || [];
+  if (!msgs.length) return null;
+
+  // Find the newest message and read its threading headers.
+  const metas = await Promise.all(
+    msgs.map((m: any) =>
+      apiGet(
+        `/messages/${m.id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References&metadataHeaders=Subject&metadataHeaders=Date`,
+        token
+      ).catch(() => null)
+    )
+  );
+  let best: any = null;
+  for (const m of metas) {
+    if (!m) continue;
+    const t = Number(m.internalDate) || 0;
+    if (!best || t > (Number(best.internalDate) || 0)) best = m;
+  }
+  if (!best) return null;
+  const hs = best.payload?.headers || [];
+  const messageId = header(hs, "Message-ID") || undefined;
+  const priorRefs = header(hs, "References") || "";
+  return {
+    threadId: best.threadId,
+    messageId,
+    references: [priorRefs, messageId].filter(Boolean).join(" ").trim() || undefined,
+    subject: header(hs, "Subject") || undefined,
+  };
+}
+
+function encodeHeader(value: string): string {
+  // RFC2047-encode non-ASCII header values; leave plain ASCII untouched.
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+function buildMime(opts: {
+  from: string;
+  to: string[];
+  cc?: string[];
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+  references?: string;
+}): string {
+  const lines: string[] = [];
+  lines.push(`From: ${opts.from}`);
+  lines.push(`To: ${opts.to.join(", ")}`);
+  if (opts.cc && opts.cc.length) lines.push(`Cc: ${opts.cc.join(", ")}`);
+  lines.push(`Subject: ${encodeHeader(opts.subject)}`);
+  if (opts.inReplyTo) lines.push(`In-Reply-To: ${opts.inReplyTo}`);
+  if (opts.references) lines.push(`References: ${opts.references}`);
+  lines.push("MIME-Version: 1.0");
+  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  lines.push("Content-Transfer-Encoding: 8bit");
+  lines.push("");
+  lines.push(opts.body);
+  return lines.join("\r\n");
+}
+
+const b64url = (s: string): string =>
+  Buffer.from(s, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+export interface SendInput {
+  to: { name?: string; email: string }[];
+  cc?: { name?: string; email: string }[];
+  subject: string;
+  body: string;
+  threadId?: string; // reply-in-thread
+  inReplyTo?: string; // Message-ID of the message being replied to
+  references?: string;
+}
+
+export interface SendResult {
+  sent: boolean;
+  testMode: boolean;
+  actualTo: string[]; // what actually received it
+  intendedTo: string[]; // what it WOULD have gone to in production
+  intendedCc: string[];
+  id?: string;
+  threadId?: string;
+  error?: string;
+}
+
+const fmtAddr = (a: { name?: string; email: string }): string =>
+  a.name ? `${encodeHeader(a.name)} <${a.email}>` : a.email;
+
+/**
+ * Send an email as the OAuth account. In test mode the real recipients are
+ * replaced by TEST_RECIPIENT (cc dropped) and noted in a banner — nothing reaches
+ * a real founder/introducer. Callers must gate this behind explicit user consent.
+ */
+export async function sendGmail(input: SendInput): Promise<SendResult> {
+  const intendedTo = input.to.map((a) => a.email).filter(Boolean);
+  const intendedCc = (input.cc || []).map((a) => a.email).filter(Boolean);
+
+  if (!calendarConfigured()) {
+    return { sent: false, testMode: EMAIL_TEST_MODE, actualTo: [], intendedTo, intendedCc, error: "Google not configured" };
+  }
+
+  const from = await senderEmail();
+
+  let to: string[];
+  let cc: string[] | undefined;
+  let body = input.body;
+  if (EMAIL_TEST_MODE) {
+    to = [TEST_RECIPIENT];
+    cc = undefined; // never cc a real person during testing
+    const banner =
+      `[TEST MODE — not sent to the real recipient]\n` +
+      `Would send to: ${intendedTo.join(", ") || "(none)"}` +
+      (intendedCc.length ? `\ncc: ${intendedCc.join(", ")}` : "") +
+      `\n\n----------------------------------------\n\n`;
+    body = banner + body;
+  } else {
+    to = input.to.map(fmtAddr);
+    cc = input.cc && input.cc.length ? input.cc.map(fmtAddr) : undefined;
+  }
+
+  if (to.length === 0) {
+    return { sent: false, testMode: EMAIL_TEST_MODE, actualTo: [], intendedTo, intendedCc, error: "No recipient" };
+  }
+
+  const mime = buildMime({
+    from: `Zann Ali <${from}>`,
+    to,
+    cc,
+    subject: input.subject,
+    body,
+    inReplyTo: input.inReplyTo,
+    references: input.references,
+  });
+
+  const token = await accessToken();
+  const payload: any = { raw: b64url(mime) };
+  if (input.threadId) payload.threadId = input.threadId;
+
+  const res = await fetch(`${GMAIL_BASE}/messages/send`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    return {
+      sent: false,
+      testMode: EMAIL_TEST_MODE,
+      actualTo: to,
+      intendedTo,
+      intendedCc,
+      error: `Gmail send HTTP ${res.status}: ${errBody.slice(0, 200)}`,
+    };
+  }
+  const j = await res.json();
+  return {
+    sent: true,
+    testMode: EMAIL_TEST_MODE,
+    actualTo: to,
+    intendedTo,
+    intendedCc,
+    id: j.id,
+    threadId: j.threadId,
+  };
+}
+
 export async function resolveEmail(emails: string[]): Promise<EmailResolution> {
   const clean = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (!calendarConfigured()) return { configured: false, available: false, messages: [] };

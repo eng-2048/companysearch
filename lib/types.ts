@@ -229,3 +229,89 @@ export type SearchEvent =
   | { type: "bundle"; bundle: ContextBundle } // the finished (or partial) bundle
   | { type: "error"; message: string }
   | { type: "done" };
+
+// ————————————————————————— Pass / Follow-Up module —————————————————————————
+
+/** The pass-email recipient (the CEO). Always shown + editable; `verified` is
+ *  false when we couldn't confidently pin the CEO or the email, so the UI flags
+ *  it and offers `candidates` to pick from. */
+export interface PassRecipient {
+  name: string;
+  email?: string;
+  role?: string;
+  verified: boolean;
+  candidates: { name: string; email: string; role?: string }[];
+}
+
+export interface PassIntroducer {
+  name: string;
+  email?: string;
+  type?: string; // intro_d_by_type
+}
+
+export interface PassMeetingRef {
+  date: string;
+  time?: string;
+  title: string;
+  term: string;
+  attendees: { name?: string; email?: string }[];
+}
+
+export interface PassItem {
+  section: "toPass" | "recent";
+  dealFlowEntryId?: string;
+  recordId: string;
+  company: string;
+  founder?: string;
+  status?: string;
+  date?: string;
+  time?: string;
+  description?: string;
+  attioUrl?: string;
+  recipient: PassRecipient;
+  closeLoopEligible: boolean;
+  introducer?: PassIntroducer;
+  meeting?: PassMeetingRef; // recent-meeting rows carry this so drafting can find Grain
+}
+
+export interface PassFollowUpList {
+  configured: boolean;
+  testMode: boolean;
+  testRecipient: string;
+  sender?: string;
+  toPass: PassItem[];
+  toPassTotal?: number; // total in the pipeline when more than we resolve/show
+  recent: PassItem[];
+  generatedAt?: string;
+  cached?: boolean;
+}
+
+export interface PassEmailDraft {
+  kind: "pass" | "close";
+  subject: string;
+  to: { name?: string; email: string }[];
+  cc: { name?: string; email: string }[];
+  body: string;
+  mode: "fresh" | "reply";
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
+  grainUrl?: string;
+}
+
+export interface PassDraftResponse {
+  ok: boolean;
+  note?: string;
+  draft?: PassEmailDraft;
+}
+
+export interface PassSendResponse {
+  ok: boolean;
+  sent: boolean;
+  testMode: boolean;
+  actualTo: string[];
+  intendedTo: string[];
+  intendedCc: string[];
+  statusFlipped?: boolean;
+  error?: string;
+}
