@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { SearchEvent } from "@/lib/types";
 import { gatherContext } from "@/lib/gather";
+import { findCandidates } from "@/lib/attio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +15,10 @@ function line(evt: SearchEvent): Uint8Array {
 }
 
 export async function POST(req: NextRequest) {
-  const { query } = await req.json().catch(() => ({ query: "" }));
-  const name = String(query ?? "").trim();
+  const body = await req.json().catch(() => ({}));
+  const name = String(body?.query ?? "").trim();
+  // Set when the user picked a specific record from the disambiguation list.
+  const recordId = body?.recordId ? String(body.recordId) : undefined;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -30,9 +33,21 @@ export async function POST(req: NextRequest) {
 
       try {
         send({ type: "status", message: "Resolving the entity in Attio (companies + people)…" });
+
+        // Unless the user already picked a record, check for an ambiguous name
+        // (e.g. two "Etched" records) and let them choose instead of guessing.
+        if (!recordId) {
+          const options = await findCandidates(name);
+          if (options.length >= 2) {
+            send({ type: "candidates", query: name, options });
+            send({ type: "done" });
+            return;
+          }
+        }
+
         send({ type: "status", message: "Collecting record IDs, emails, and the deal_flow entry…" });
 
-        const bundle = await gatherContext(name);
+        const bundle = await gatherContext(name, { recordId });
 
         send({ type: "status", message: "Bundle assembled." });
         send({ type: "bundle", bundle });

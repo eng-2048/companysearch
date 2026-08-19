@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ContextBundle, SearchEvent, PrepResult, FormEntryList } from "@/lib/types";
+import { ContextBundle, SearchEvent, PrepResult, FormEntryList, SearchCandidate } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
 import MeetingPrep from "@/components/MeetingPrep";
@@ -35,6 +35,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [statuses, setStatuses] = useState<string[]>([]);
   const [bundle, setBundle] = useState<ContextBundle | null>(null);
+  const [candidates, setCandidates] = useState<{ query: string; options: SearchCandidate[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sugs, setSugs] = useState<Suggestions>({ configured: false, upcoming: [], recent: [] });
@@ -98,7 +99,7 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  async function run(term?: string) {
+  async function run(term?: string, recordId?: string) {
     const name = (term ?? query).trim();
     if (!name || loading) return;
 
@@ -107,6 +108,7 @@ export default function Home() {
     setLoading(true);
     setStatuses([]);
     setBundle(null);
+    setCandidates(null);
     setError(null);
 
     const ctrl = new AbortController();
@@ -116,7 +118,7 @@ export default function Home() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: name }),
+        body: JSON.stringify({ query: name, recordId }),
         signal: ctrl.signal,
       });
       if (!res.body) throw new Error("No response stream");
@@ -134,6 +136,7 @@ export default function Home() {
           if (!line.trim()) continue;
           const evt: SearchEvent = JSON.parse(line);
           if (evt.type === "status") setStatuses((s) => [...s, evt.message]);
+          else if (evt.type === "candidates") setCandidates({ query: evt.query, options: evt.options });
           else if (evt.type === "bundle") setBundle(evt.bundle);
           else if (evt.type === "error") setError(evt.message);
         }
@@ -255,6 +258,38 @@ export default function Home() {
       )}
 
       {error && <div className="error-box">⚠ {error}</div>}
+
+      {candidates && !bundle && (
+        <div className="candidates">
+          <div className="cand-hint">
+            A few records match &ldquo;{candidates.query}&rdquo; — pick the right one:
+          </div>
+          {candidates.options.map((o) => (
+            <button
+              key={o.recordId}
+              type="button"
+              className="cand-row"
+              onClick={() => run(candidates.query, o.recordId)}
+            >
+              <div className="cand-top">
+                <span className="cand-name">
+                  {o.name}
+                  {o.isStealth ? " (stealth)" : ""}
+                </span>
+                {o.status ? (
+                  <span className="pill status">{o.status}</span>
+                ) : (
+                  <span className="cand-nodeal">no deal record</span>
+                )}
+              </div>
+              <div className="cand-meta">
+                {[o.description, o.domain, o.location].filter(Boolean).join(" · ") || "—"}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       {bundle && <ResultCard bundle={bundle} />}
         </div>
         <div hidden={!formMode}>

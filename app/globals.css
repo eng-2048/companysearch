@@ -713,6 +713,56 @@ a:hover {
   border-bottom: 1px solid var(--border);
 }
 
+/* ---------- Disambiguation picker ---------- */
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.cand-hint {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.cand-row {
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: border-color 0.15s, background 0.15s;
+}
+.cand-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.cand-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+.cand-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.cand-nodeal {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+}
+.cand-meta {
+  margin-top: 5px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
 /* Status pill */
 .pill {
   font-size: 12px;

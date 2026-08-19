@@ -315,7 +315,7 @@ function personMatchesSlug(
  */
 export async function resolveEntity(
   query: string,
-  opts: { emailHints?: string[] } = {}
+  opts: { emailHints?: string[]; recordId?: string } = {}
 ): Promise<AttioResolution> {
   const term = cleanTerm(query) || query.trim();
   const queryIsPerson = looksLikePersonName(query);
@@ -455,6 +455,14 @@ export async function resolveEntity(
       companyById.set(recordId(scored[0].rec), scored[0].rec);
       matchedViaLinkedin = true;
     }
+  }
+
+  // Caller picked a specific company (disambiguation) — resolve to exactly that
+  // record so everything downstream (deal_flow, people, notes) is scoped to it.
+  if (opts.recordId) {
+    const rec = companyById.get(opts.recordId) || (await getRecord(COMPANIES_OBJECT, opts.recordId));
+    companyById.clear();
+    if (rec) companyById.set(opts.recordId, rec);
   }
 
   const candidateCompanies = [...companyById.values()];
@@ -673,4 +681,90 @@ export async function resolveEntity(
     lastMeetingAt: calInteractionAt(featured, "last_calendar_interaction"),
     candidatesConsidered: candidateCompanies.length,
   };
+}
+
+export interface CompanyCandidate {
+  name: string;
+  recordId: string;
+  domain?: string;
+  description?: string;
+  location?: string;
+  isStealth: boolean;
+  webUrl?: string;
+  hasDeal: boolean;
+  status?: string;
+}
+
+/**
+ * Lightweight probe for disambiguation: the company records that plausibly match
+ * the query by NAME (plus companies linked from a matching founder-person). No
+ * people/notes/Grain — just enough to show the user a picker when several close
+ * records exist (e.g. two "Etched" records). Returns [] for email/unique queries.
+ */
+export async function findCandidates(
+  query: string,
+  opts: { emailHints?: string[] } = {}
+): Promise<CompanyCandidate[]> {
+  const term = cleanTerm(query) || query.trim();
+  if (!term || query.includes("@")) return []; // email queries resolve uniquely
+  const qn = normName(term);
+  const queryIsPerson = looksLikePersonName(query);
+
+  const [companyHits, peopleHits] = await Promise.all([
+    searchRecords(COMPANIES_OBJECT, term),
+    searchRecords(PEOPLE_OBJECT, term),
+  ]);
+  const companyById = new Map<string, any>();
+  for (const c of companyHits) companyById.set(recordId(c), c);
+
+  // Companies linked from a plausible founder-person (founder-name queries).
+  if (queryIsPerson) {
+    const linked = new Set<string>();
+    for (const p of peopleHits) {
+      if (!normName(recordName(p) || "").includes(qn)) continue;
+      const cid = first(p.values?.company)?.target_record_id;
+      if (cid && !companyById.has(cid)) linked.add(cid);
+    }
+    const recs = await Promise.all([...linked].map((id) => getRecord(COMPANIES_OBJECT, id)));
+    for (const c of recs) if (c) companyById.set(recordId(c), c);
+  }
+
+  const nameScore = (c: any): number => {
+    const n = normName(recordName(c) || "");
+    if (n === qn) return 3;
+    if (n.includes(qn) || qn.includes(n)) return 2;
+    return 0;
+  };
+  // Only close name matches are disambiguation candidates.
+  const strong = [...companyById.values()]
+    .filter((c) => nameScore(c) >= 2)
+    .sort((a, b) => nameScore(b) - nameScore(a))
+    .slice(0, 6);
+
+  // Attach deal_flow status for each (so the picker can show it).
+  const out: CompanyCandidate[] = [];
+  for (const c of strong) {
+    const entries = await recordEntries(COMPANIES_OBJECT, recordId(c));
+    const de = entries.find((e) => e.list_api_slug === DEAL_FLOW_SLUG);
+    let status: string | undefined;
+    if (de) {
+      const entry = await getDealFlowEntry(de.entry_id);
+      status = statusVal(entry?.entry_values?.status);
+    }
+    const rawName = recordName(c) || term;
+    out.push({
+      name: rawName,
+      recordId: recordId(c),
+      domain: recordDomains(c)[0],
+      description: textVal(c.values?.description),
+      location: first(c.values?.primary_location)?.locality || undefined,
+      isStealth: isStealthName(rawName) || recordDomains(c).length === 0,
+      webUrl: c.web_url,
+      hasDeal: !!de,
+      status,
+    });
+  }
+  // Deals first, then by name-match strength.
+  out.sort((a, b) => Number(b.hasDeal) - Number(a.hasDeal));
+  return out;
 }

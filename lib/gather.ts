@@ -129,15 +129,23 @@ function notFound(query: string): ContextBundle {
 
 export async function gatherContext(
   query: string,
-  opts: { attioOnly?: boolean; emailHints?: string[] } = {}
+  opts: { attioOnly?: boolean; emailHints?: string[]; recordId?: string } = {}
 ): Promise<ContextBundle> {
-  const attio = await resolveEntity(query, { emailHints: opts.emailHints });
+  const attio = await resolveEntity(query, {
+    emailHints: opts.emailHints,
+    recordId: opts.recordId,
+  });
+
+  // A bare first name ("Ben") as a Grain/Calendar term matches every unrelated
+  // "Ben …" recording, so only search by the founder when it's a full name.
+  const isFullName = (n?: string): boolean =>
+    !!n && n.trim().split(/\s+/).filter(Boolean).length >= 2;
 
   // Build Grain search terms from whatever we now know.
   const terms: string[] = [];
   if (attio.found && attio.featuredCompany) {
     terms.push(attio.featuredCompany.name.replace(/\(.*?\)/g, "").trim());
-    if (attio.founderName) terms.push(attio.founderName);
+    if (isFullName(attio.founderName)) terms.push(attio.founderName!);
   }
   terms.push(query.replace(/\(.*?\)/g, "").trim());
 
@@ -168,7 +176,10 @@ export async function gatherContext(
 
   const grainRecordings = toGrainRecordings(grain.recordings);
   // --- Google Calendar (recent past + upcoming) ---
-  const calTerms = [company.replace(/\(.*?\)/g, "").trim(), founder].filter(Boolean);
+  const calTerms = [
+    company.replace(/\(.*?\)/g, "").trim(),
+    isFullName(founder) ? founder : undefined,
+  ].filter(Boolean) as string[];
   let calendar: CalendarResolution = { events: [], configured: calendarConfigured() };
   let calError: string | undefined;
   try {

@@ -209,9 +209,23 @@ export interface FormDraftResponse {
   meeting?: FormEntryMeeting; // present when resolved
 }
 
+/** A company record offered for disambiguation when several match the query. */
+export interface SearchCandidate {
+  name: string;
+  recordId: string;
+  domain?: string;
+  description?: string;
+  location?: string;
+  isStealth: boolean;
+  webUrl?: string;
+  hasDeal: boolean;
+  status?: string;
+}
+
 /** Streaming protocol between backend and UI. */
 export type SearchEvent =
   | { type: "status"; message: string } // progress line, e.g. "Resolving in Attio…"
+  | { type: "candidates"; query: string; options: SearchCandidate[] } // pick the right record
   | { type: "bundle"; bundle: ContextBundle } // the finished (or partial) bundle
   | { type: "error"; message: string }
   | { type: "done" };
