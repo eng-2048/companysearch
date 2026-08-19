@@ -11,7 +11,8 @@ import { resolveEntity, AttioResolution, DealFlow } from "./attio";
 import { getPastDaysMeetings, companyTermsForEmail, DayMeeting } from "./suggestions";
 import { resolveGrain, getTranscript } from "./grain";
 import { draftNotes, extractEquity, extractRound } from "./notesDraft";
-import { normalize } from "./match";
+import { normalize, squish } from "./match";
+import { hashKey } from "./dayCache";
 import {
   FormEntryList,
   FormEntryMeeting,
@@ -412,6 +413,9 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
         company,
         term: m.term,
         attendees: ext.map((a) => ({ name: a.name, email: a.email })),
+        // Stable id for the dismiss store — date + the resolved company (or the
+        // person/term when unresolved), so dismissing one meeting is durable.
+        key: hashKey(`${date}|${squish(company || person || m.term)}`),
       };
     })
   );

@@ -182,6 +182,7 @@ export interface FormEntryListItem {
   company?: string; // company guessed from the email domain (row label)
   term: string; // the title-derived term — used as the draft resolution key
   attendees: { name?: string; email?: string }[];
+  key: string; // stable id for the manual "not needed" dismiss store
 }
 
 export interface FormEntryList {

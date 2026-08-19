@@ -1507,3 +1507,39 @@ a:hover {
   line-height: 1.45;
 }
 .cmp-prior strong { color: #fff; }
+
+/* Form Entry: dismiss (✕ not needed) */
+.fe-actions { display: flex; align-items: center; gap: 8px; }
+.fe-x {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.fe-x:hover { border-color: var(--red); color: var(--red); }
+.fe-dismissed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.fe-undo {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fe-undo:hover { text-decoration: underline; }

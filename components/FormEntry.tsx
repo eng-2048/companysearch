@@ -156,6 +156,20 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  async function dismiss(undo = false) {
+    setDismissed(!undo);
+    try {
+      await fetch("/api/form-entry/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: m.key, undo }),
+      });
+    } catch {
+      /* best-effort; the row is already hidden/restored optimistically */
+    }
+  }
 
   async function runDraft() {
     setLoading(true);
@@ -187,6 +201,17 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
   const label =
     [m.person, m.company].filter(Boolean).join(" · ") || m.company || m.person || m.term;
 
+  if (dismissed) {
+    return (
+      <div className="fe-dismissed">
+        <span>“{label}” marked not needed.</span>
+        <button className="fe-undo" onClick={() => dismiss(true)} type="button">
+          Undo
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="fe-card">
       <div className="fe-head">
@@ -198,15 +223,25 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
           </div>
           {who && <div className="fe-attendees">{who}</div>}
         </div>
-        {!draft ? (
-          <button className="fe-open" onClick={runDraft} disabled={loading}>
-            {loading ? "Drafting…" : "Draft form"}
+        <div className="fe-actions">
+          {!draft ? (
+            <button className="fe-open" onClick={runDraft} disabled={loading}>
+              {loading ? "Drafting…" : "Draft form"}
+            </button>
+          ) : (
+            <button className="fe-toggle" onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide draft" : "Show draft"}
+            </button>
+          )}
+          <button
+            className="fe-x"
+            onClick={() => dismiss()}
+            type="button"
+            title="Not needed — remove from the list"
+          >
+            ✕
           </button>
-        ) : (
-          <button className="fe-toggle" onClick={() => setOpen((o) => !o)}>
-            {open ? "Hide draft" : "Show draft"}
-          </button>
-        )}
+        </div>
       </div>
 
       {err && <div className="fe-warn">{err}</div>}
@@ -276,9 +311,10 @@ export default function FormEntry({
       </div>
 
       <p className="fe-note">
-        Your recent meetings. Hit <strong>Draft form</strong> on the ones you want — it pulls
-        the context, drafts the First Meeting Deal Feedback form (pick a recommendation, tag it,
-        edit the notes), then opens the real Airtable form pre-filled to review and submit.
+        Your running to-do list of forms to submit. Hit <strong>Draft form</strong> to draft the
+        First Meeting Deal Feedback form and open it pre-filled, or <strong>✕</strong> to drop a
+        meeting that doesn&apos;t need one. Meetings whose form is already submitted in Airtable
+        fall off automatically.
       </p>
 
       {loading && !data && (
