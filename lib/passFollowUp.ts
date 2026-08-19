@@ -13,13 +13,14 @@ import {
 } from "./attio";
 import { getPastDaysMeetings, DayMeeting } from "./suggestions";
 import { resolveGrain, getTranscript } from "./grain";
+import { normalize } from "./match";
 import {
   resolveToAttio,
   findGrainMatch,
   externalAttendees,
   GrainMatch,
 } from "./formEntry";
-import { draftPassEmail, draftCloseLoop } from "./passDraft";
+import { draftPassEmail, draftCloseLoop, draftWatchEmail } from "./passDraft";
 import {
   EMAIL_TEST_MODE,
   TEST_RECIPIENT,
@@ -46,9 +47,9 @@ const ZANN_MEMBER_ID = "8a182b51-6194-4b04-85e0-991657cfe9db";
 const MAX_TO_PASS_RESOLVE = 40;
 const MAX_TO_PASS_FETCH = 300;
 
-// Recent meetings in these states are done deals (won or already dead) — not
-// follow-up candidates, so they're dropped from the list.
-const DROP_RECENT_STATUS = /\b(pass|closed|closing|lost)\b/i;
+// Recent meetings in these states are done deals (won, dead, or being tracked
+// separately) — not follow-up candidates, so they're dropped from the list.
+const DROP_RECENT_STATUS = /\b(pass|closed|closing|lost|watch)\b/i;
 
 const GENERIC_EMAIL_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
@@ -80,34 +81,119 @@ function attioUrlFor(attio: AttioResolution): string | undefined {
   return `https://app.attio.com/2048-ventures/company/${c.recordId}/overview`;
 }
 
-/** Resolve the CEO recipient from an Attio bundle. Always returns something to
- *  show; `verified` is false (→ UI flags it) when we can't confidently pin the
- *  CEO or an email. `candidates` are the other people/emails to pick from. */
-function ceoRecipient(attio: AttioResolution): PassRecipient {
-  const people = attio.people || [];
-  const withEmail = people.filter((p) => p.emails && p.emails[0]);
-  const candidates = withEmail.map((p) => ({
-    name: p.name,
-    email: p.emails[0],
-    role: p.jobTitle,
-  }));
+const liSlug = (url?: string): string | undefined =>
+  url ? url.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase() : undefined;
 
-  const isCeo = (p: (typeof people)[number]) =>
-    /ceo|chief executive|founder/i.test(p.jobTitle || "") || p.name === attio.founderName;
+/** "oliver-wesche-1234" → "Oliver Wesche"; a single concatenated token → undefined. */
+function nameFromSlug(slug?: string): string | undefined {
+  if (!slug) return undefined;
+  const parts = slug.split(/[-.]+/).filter((p) => p && !/\d/.test(p) && p.length > 1);
+  if (parts.length < 2) return undefined;
+  return parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(" ");
+}
 
-  const ceo =
-    people.find((p) => isCeo(p) && p.emails && p.emails[0]) ||
-    people.find((p) => p.name === attio.founderName) ||
-    withEmail[0] ||
-    people[0];
+const isCeoRole = (role?: string) => /ceo|chief executive|founder/i.test(role || "");
 
-  const name = ceo?.name || attio.founderName || "";
-  const email = ceo?.emails?.[0];
-  const role = ceo?.jobTitle;
-  // Confident only when we have a CEO/founder-tagged person AND an email for them.
-  const verified = !!(ceo && email && (/ceo|chief executive|founder/i.test(role || "") || ceo.name === attio.founderName));
+/** A real personal name (not an email handle like "tglasgow") — gates whether we
+ *  greet by first name and whether the recipient counts as confirmed. */
+function looksLikeRealName(name?: string, email?: string): boolean {
+  const n = (name || "").trim();
+  if (!n || n.includes("@")) return false;
+  const local = (email || "").split("@")[0].toLowerCase();
+  if (n.toLowerCase() === local) return false; // it's just the email handle
+  if (/\s/.test(n)) return true; // multi-word name
+  return /^[A-Za-z][a-z]+$/.test(n) && n.toLowerCase() !== local; // proper single first name
+}
 
-  return { name, email, role, verified, candidates };
+/**
+ * Deduce the CEO recipient across every source we have — Attio people, the deal's
+ * CEO LinkedIn slug (name + email match), and any extra contacts from the Grain
+ * call / calendar attendees. Always returns something to show; `verified` is true
+ * only when we're confident about BOTH the person and an email. When it stays
+ * ambiguous, the email is left blank (the UI flags it) rather than guessed wrong.
+ */
+function deduceRecipient(
+  attio: AttioResolution,
+  extras: { name?: string; email?: string }[] = []
+): PassRecipient {
+  type C = { name?: string; email: string; role?: string };
+  const pool: C[] = [];
+  const seen = new Set<string>();
+  const push = (name?: string, email?: string, role?: string) => {
+    const e = (email || "").trim().toLowerCase();
+    if (!e.includes("@") || e.endsWith("@2048.vc")) return;
+    const existing = pool.find((c) => c.email === e);
+    if (existing) {
+      if (name && !existing.name) existing.name = name;
+      if (role && !existing.role) existing.role = role;
+      return;
+    }
+    if (seen.has(e)) return;
+    seen.add(e);
+    pool.push({ name, email: e, role });
+  };
+  for (const p of attio.people || []) push(p.name, p.emails?.[0], p.jobTitle);
+  // Team/linked contacts from Attio (includes nameless stubs like "j@company.com"
+  // that `people` drops — often the founder we want).
+  for (const c of attio.contactEmails || []) push(c.name, c.email, c.role);
+  for (const x of extras) push(x.name, x.email);
+
+  // The CEO's name — a CEO-tagged person, else the resolved founder, else the
+  // name derived from the deal's CEO LinkedIn slug (this is the Lykos case).
+  const ceoSlug = liSlug(attio.dealFlow?.ceoLinkedin);
+  const ceoNameFromSlug = nameFromSlug(ceoSlug);
+  const ceoPerson = (attio.people || []).find((p) => isCeoRole(p.jobTitle));
+  const founderClean =
+    attio.founderName && !attio.featuredCompany?.name.includes(attio.founderName)
+      ? attio.founderName
+      : undefined;
+  const ceoName = ceoPerson?.name || founderClean || ceoNameFromSlug;
+
+  // Pick the email, most confident signal first.
+  let chosen: C | undefined;
+  let verified = false;
+
+  // 1) A CEO/founder-tagged Attio person who has an email.
+  const ceoWithEmail = (attio.people || []).find((p) => isCeoRole(p.jobTitle) && p.emails?.[0]);
+  if (ceoWithEmail) {
+    chosen = { name: ceoWithEmail.name, email: ceoWithEmail.emails[0], role: ceoWithEmail.jobTitle };
+    verified = true;
+  }
+  // 2) The CEO LinkedIn slug matches an email's local part (…/in/aurnovcy ~ aurnov@…).
+  if (!chosen && ceoSlug) {
+    const s = ceoSlug.replace(/[^a-z0-9]/g, "");
+    chosen = pool.find((c) => {
+      const local = c.email.split("@")[0].replace(/[^a-z0-9]/g, "");
+      return local.length >= 3 && (s.includes(local) || local.includes(s));
+    });
+    if (chosen) verified = true;
+  }
+  // 3) The CEO name shares a distinctive token with a candidate's name.
+  if (!chosen && ceoName) {
+    const toks = normalize(ceoName).split(" ").filter((t) => t.length >= 3);
+    chosen = pool.find(
+      (c) => c.name && toks.some((t) => normalize(c.name!).split(" ").includes(t))
+    );
+    if (chosen) verified = true;
+  }
+  // 4) Exactly one external contact across all sources — almost certainly the founder.
+  if (!chosen && pool.length === 1) {
+    chosen = pool[0];
+    verified = true;
+  }
+
+  const candidates = pool.map((c) => ({ name: c.name || c.email, email: c.email, role: c.role }));
+  const name = chosen?.name || ceoName || "";
+  // Confident only with an email AND a REAL name — if we found an email but can't
+  // name the person (a bare "j@company.com", or a handle like "tglasgow"), leave
+  // it flagged so Zann checks and the greeting stays neutral.
+  return {
+    name,
+    email: chosen?.email,
+    role: chosen?.role,
+    verified: verified && !!chosen?.email && looksLikeRealName(name, chosen?.email),
+    candidates,
+  };
 }
 
 function introducerFrom(attio: AttioResolution): {
@@ -155,7 +241,7 @@ function passItemFromAttio(
     time: opts.meeting?.time,
     description: c.description,
     attioUrl: attioUrlFor(attio),
-    recipient: ceoRecipient(attio),
+    recipient: deduceRecipient(attio, opts.meeting?.attendees || []),
     closeLoopEligible: eligible,
     introducer,
     meeting: opts.meeting,
@@ -234,9 +320,11 @@ export async function listPassFollowUp(numDays = 10): Promise<PassFollowUpList> 
   );
   for (const item of resolvedRecent) {
     if (!item) continue;
-    // Drop done deals (Pass / Closed / Closing / Lost) and de-dupe against the
-    // To Pass section. Rows that didn't resolve to an Attio company are already
-    // filtered out above (null).
+    // Only actual pipeline deals: a resolved company without a deal_flow entry
+    // (a VC firm, a law firm, a vendor) isn't a follow-up candidate.
+    if (!item.dealFlowEntryId) continue;
+    // Drop done deals (Pass / Closed / Closing / Lost / Watch) and de-dupe against
+    // the To Pass section.
     if (DROP_RECENT_STATUS.test(item.status || "")) continue;
     if (seen.has(item.recordId)) continue;
     seen.add(item.recordId);
@@ -249,7 +337,7 @@ export async function listPassFollowUp(numDays = 10): Promise<PassFollowUpList> 
 // ————————————————————————————————— Drafting —————————————————————————————————
 
 export interface PassDraftRequest {
-  kind: "pass" | "close";
+  kind: "pass" | "close" | "watch";
   recordId?: string; // To Pass rows resolve by company record
   meeting?: PassMeetingRef; // recent rows resolve by the meeting
   reasons: string[];
@@ -285,10 +373,20 @@ async function grainFor(
     if (!recordings.length) return { points: [] };
     const pick = recordings[0];
     const transcript = await getTranscript(pick.id);
-    return { url: pick.url, points: pick.summaryPoints || [], transcript };
+    return { url: pick.url, points: pick.summaryPoints || [], transcript, participants: pick.participants };
   } catch {
     return { points: [] };
   }
+}
+
+/** Contacts to feed CEO deduction: external Grain participants + meeting attendees. */
+function extraContacts(grain: GrainMatch, meeting?: PassMeetingRef): { name?: string; email?: string }[] {
+  const out: { name?: string; email?: string }[] = [];
+  for (const p of grain.participants || []) {
+    if (p.external !== false && p.email) out.push({ name: p.name, email: p.email });
+  }
+  for (const a of meeting?.attendees || []) out.push({ name: a.name, email: a.email });
+  return out;
 }
 
 /** The latest email thread with these addresses, plus a short message preview —
@@ -352,10 +450,9 @@ export async function draftEmail(req: PassDraftRequest): Promise<PassDraftRespon
   const company = cleanName(attio.featuredCompany.name);
   const grain = await grainFor(attio, req.meeting);
 
-  if (req.kind === "pass") {
-    return draftPass(attio, company, grain, req);
-  }
-  return draftClose(attio, company, grain, req);
+  if (req.kind === "close") return draftClose(attio, company, grain, req);
+  if (req.kind === "watch") return draftWatch(attio, company, grain, req);
+  return draftPass(attio, company, grain, req);
 }
 
 // Drafting produces the body + recipient + a default (fresh) subject only.
@@ -367,7 +464,7 @@ async function draftPass(
   grain: GrainMatch,
   req: PassDraftRequest
 ): Promise<PassDraftResponse> {
-  const recipient = ceoRecipient(attio);
+  const recipient = deduceRecipient(attio, extraContacts(grain, req.meeting));
   // Only greet by first name when we actually trust the recipient; otherwise stay
   // neutral ("Hi there,") so the draft doesn't hard-code a wrong name.
   const founderFirst = recipient.verified ? firstNameOf(recipient.name || attio.founderName) : "";
@@ -384,6 +481,39 @@ async function draftPass(
 
   const draft: PassEmailDraft = {
     kind: "pass",
+    subject: DEFAULT_SUBJECT,
+    to: recipient.email ? [{ name: recipient.name, email: recipient.email }] : [],
+    cc: [],
+    body,
+    mode: "fresh",
+    grainUrl: grain.url,
+  };
+  const note = recipient.verified
+    ? undefined
+    : "Double-check the recipient — I couldn't confirm the CEO's name/email from Attio.";
+  return { ok: true, note, draft };
+}
+
+async function draftWatch(
+  attio: AttioResolution,
+  company: string,
+  grain: GrainMatch,
+  req: PassDraftRequest
+): Promise<PassDraftResponse> {
+  const recipient = deduceRecipient(attio, extraContacts(grain, req.meeting));
+  const founderFirst = recipient.verified ? firstNameOf(recipient.name || attio.founderName) : "";
+
+  const body = await draftWatchEmail({
+    company,
+    founderFirstName: founderFirst,
+    founderFullName: recipient.name || attio.founderName,
+    callPoints: grain.points,
+    transcript: grain.transcript,
+    customInstructions: req.customInstructions,
+  });
+
+  const draft: PassEmailDraft = {
+    kind: "watch",
     subject: DEFAULT_SUBJECT,
     to: recipient.email ? [{ name: recipient.name, email: recipient.email }] : [],
     cc: [],
@@ -415,7 +545,7 @@ async function draftClose(
     sourceEmail = contact.email;
   }
 
-  const founderName = ceoRecipient(attio).name || attio.founderName || company;
+  const founderName = deduceRecipient(attio).name || attio.founderName || company;
   const body = await draftCloseLoop({
     company,
     founderName,

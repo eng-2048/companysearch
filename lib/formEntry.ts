@@ -137,6 +137,7 @@ export interface GrainMatch {
   url?: string;
   points: string[]; // the call's summary bullets, for seeding Other Notes
   transcript?: string; // full transcript, for equity extraction
+  participants?: { name?: string; email?: string; external?: boolean }[]; // for CEO deduction
 }
 
 /** Find the Grain recording for THIS meeting (we don't populate Attio's
@@ -169,7 +170,7 @@ export async function findGrainMatch(
     // 3) It's a first meeting, so the newest match is almost certainly this one.
     const pick = byEmail || byDate || recordings[0];
     const transcript = await getTranscript(pick.id);
-    return { url: pick.url, points: pick.summaryPoints || [], transcript };
+    return { url: pick.url, points: pick.summaryPoints || [], transcript, participants: pick.participants };
   } catch {
     return { points: [] };
   }

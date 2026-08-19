@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // resolved recipient and thread info. Not cached (depends on reasons / prompt).
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Partial<PassDraftRequest>;
-  const kind = body.kind === "close" ? "close" : "pass";
+  const kind = body.kind === "close" ? "close" : body.kind === "watch" ? "watch" : "pass";
   const mode = body.mode === "reply" ? "reply" : "fresh";
 
   if (!body.recordId && !body.meeting) {

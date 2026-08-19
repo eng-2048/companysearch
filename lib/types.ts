@@ -287,7 +287,7 @@ export interface PassFollowUpList {
 }
 
 export interface PassEmailDraft {
-  kind: "pass" | "close";
+  kind: "pass" | "close" | "watch";
   subject: string;
   to: { name?: string; email: string }[];
   cc: { name?: string; email: string }[];

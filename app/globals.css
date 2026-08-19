@@ -1444,3 +1444,29 @@ a:hover {
   margin: 14px 0 8px;
 }
 .pfu-cl-sub { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
+
+/* ---------- Pass / Follow-Up: email-type selector, follow-up date ---------- */
+.pfu-type {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.pfu-type button {
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pfu-type button.on { background: var(--accent-soft); color: var(--accent); }
+.pfu-type button + button { border-left: 1px solid var(--border-strong); }
+
+.cmp-followup { margin-top: 14px; }
+.cmp-followup input[type="date"] {
+  color-scheme: dark;
+  max-width: 220px;
+}

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { sendGmail } from "@/lib/gmail";
-import { updateStatus } from "@/lib/attio";
+import { updateStatus, updateFollowUpDate } from "@/lib/attio";
 import { PassSendResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -57,12 +57,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Pass emails move the deal to Pass (only after a successful send).
+    // After a successful send, write the deal state:
+    //  - pass  → status "Pass"
+    //  - watch → status "Watch" + the chosen Follow Up Date
+    // (only when we have the deal_flow entry to write to).
     let statusFlipped = false;
-    if (body.kind === "pass" && body.flipStatus && body.dealFlowEntryId) {
+    if (body.dealFlowEntryId) {
+      const entryId = String(body.dealFlowEntryId);
       try {
-        await updateStatus(String(body.dealFlowEntryId), "Pass");
-        statusFlipped = true;
+        if (body.kind === "pass" && body.flipStatus) {
+          await updateStatus(entryId, "Pass");
+          statusFlipped = true;
+        } else if (body.kind === "watch") {
+          await updateStatus(entryId, "Watch");
+          statusFlipped = true;
+          if (body.followUpDate) await updateFollowUpDate(entryId, String(body.followUpDate));
+        }
       } catch {
         statusFlipped = false;
       }

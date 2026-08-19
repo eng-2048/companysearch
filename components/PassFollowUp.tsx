@@ -90,6 +90,10 @@ const parseCc = (s: string): Addr[] =>
 /** One email composer — pass email or close-the-loop. The generic draft loads on
  *  mount (for the pass email); the refine controls sit BELOW the draft; and
  *  fresh-vs-reply + thread history are chosen on a review step before sending. */
+function defaultFollowUp(): string {
+  return new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10);
+}
+
 function EmailComposer({
   item,
   kind,
@@ -98,13 +102,14 @@ function EmailComposer({
   onSent,
 }: {
   item: PassItem;
-  kind: "pass" | "close";
+  kind: "pass" | "close" | "watch";
   testRecipient: string;
   autoLoad: boolean;
   onSent?: () => void;
 }) {
   const [phase, setPhase] = useState<"compose" | "review">("compose");
   const [reasons, setReasons] = useState<string[]>([]);
+  const [followUpDate, setFollowUpDate] = useState(defaultFollowUp());
   const [instructions, setInstructions] = useState("");
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -206,10 +211,17 @@ function EmailComposer({
       setError("Add a valid recipient email first.");
       return;
     }
+    const label = kind === "pass" ? "pass" : kind === "watch" ? "keep-in-touch" : "close-the-loop";
+    const afterEffect =
+      kind === "pass" && item.dealFlowEntryId
+        ? `\n\nThe deal will be marked "Pass" in Attio.`
+        : kind === "watch" && item.dealFlowEntryId
+          ? `\n\nThe deal will be marked "Watch" with a follow-up date of ${followUpDate}.`
+          : "";
     const ok = window.confirm(
-      `Send this ${kind === "pass" ? "pass" : "close-the-loop"} email?\n\n` +
+      `Send this ${label} email?\n\n` +
         `TEST MODE: it will actually go to ${testRecipient} (not ${toEmail}).` +
-        (kind === "pass" && item.dealFlowEntryId ? `\n\nThe deal will be marked "Pass" in Attio.` : "")
+        afterEffect
     );
     if (!ok) return;
 
@@ -231,12 +243,13 @@ function EmailComposer({
           references: replying ? thread!.references : undefined,
           dealFlowEntryId: item.dealFlowEntryId,
           flipStatus: kind === "pass",
+          followUpDate: kind === "watch" ? followUpDate : undefined,
         }),
       });
       const j: PassSendResponse = await res.json();
       if (j.ok && j.sent) {
         setSent(j);
-        if (kind === "pass" && j.statusFlipped) onSent?.();
+        if ((kind === "pass" || kind === "watch") && j.statusFlipped) onSent?.();
       } else {
         setError(j.error || "Send failed.");
       }
@@ -247,7 +260,7 @@ function EmailComposer({
     }
   }
 
-  const unverified = kind === "pass" && !item.recipient.verified;
+  const unverified = (kind === "pass" || kind === "watch") && !item.recipient.verified;
   const candidates = item.recipient.candidates || [];
 
   // ————— close-the-loop: on-demand first draft —————
@@ -430,23 +443,40 @@ function EmailComposer({
         </a>
       )}
 
+      {/* Watch emails set a follow-up date that writes to the deal's Follow Up Date. */}
+      {kind === "watch" && (
+        <div className="cmp-field cmp-followup">
+          <label>Follow-up date (written to Attio on send)</label>
+          <input
+            type="date"
+            className="cmp-input"
+            value={followUpDate}
+            onChange={(e) => setFollowUpDate(e.target.value)}
+          />
+        </div>
+      )}
+
       {/* Refine section, below the draft */}
       <div className="cmp-refine">
         <span className="cmp-label">Refine this draft</span>
-        <div className="cmp-checks">
-          {REASONS.map((r) => (
-            <label key={r} className={`fe-check ${reasons.includes(r) ? "on" : ""}`}>
-              <input type="checkbox" checked={reasons.includes(r)} onChange={() => toggleReason(r)} />
-              {r}
-            </label>
-          ))}
-        </div>
+        {kind === "pass" && (
+          <div className="cmp-checks">
+            {REASONS.map((r) => (
+              <label key={r} className={`fe-check ${reasons.includes(r) ? "on" : ""}`}>
+                <input type="checkbox" checked={reasons.includes(r)} onChange={() => toggleReason(r)} />
+                {r}
+              </label>
+            ))}
+          </div>
+        )}
         <textarea
           className="fe-textarea cmp-instr"
           placeholder={
             kind === "pass"
               ? "Custom instructions (optional) — e.g. mention we loved the demo, keep it short, add a specific reason…"
-              : "Custom instructions (optional) — anything else to tell the introducer…"
+              : kind === "watch"
+                ? "Custom instructions (optional) — e.g. reference a milestone to check in on, keep it warm…"
+                : "Custom instructions (optional) — anything else to tell the introducer…"
           }
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
@@ -468,6 +498,7 @@ function EmailComposer({
 
 function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: string }) {
   const [open, setOpen] = useState(false);
+  const [emailType, setEmailType] = useState<"pass" | "watch">("pass");
   const [removed, setRemoved] = useState(false);
   if (removed) return null;
 
@@ -510,7 +541,7 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
 
       <div className="pfu-actions">
         <button className={`pfu-btn ${open ? "on" : ""}`} onClick={() => setOpen(!open)} type="button">
-          {open ? "Hide email" : "Draft pass email"}
+          {open ? "Hide email" : "Draft email"}
         </button>
         {item.attioUrl && (
           <a className="pfu-link" href={item.attioUrl} target="_blank" rel="noreferrer">
@@ -521,15 +552,33 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
 
       {open && (
         <div className="pfu-workspace">
+          <div className="pfu-type">
+            <button
+              className={emailType === "pass" ? "on" : ""}
+              onClick={() => setEmailType("pass")}
+              type="button"
+            >
+              Pass email
+            </button>
+            <button
+              className={emailType === "watch" ? "on" : ""}
+              onClick={() => setEmailType("watch")}
+              type="button"
+            >
+              Watch — keep in touch
+            </button>
+          </div>
+
           <EmailComposer
+            key={emailType}
             item={item}
-            kind="pass"
+            kind={emailType}
             testRecipient={testRecipient}
             autoLoad
             onSent={() => setRemoved(true)}
           />
 
-          {item.closeLoopEligible && (
+          {emailType === "pass" && item.closeLoopEligible && (
             <div className="pfu-cl">
               <div className="pfu-cl-head">
                 Close the loop

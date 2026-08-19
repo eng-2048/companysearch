@@ -57,6 +57,15 @@ export async function updateStatus(entryId: string, status: string): Promise<voi
   );
 }
 
+/** Write the Follow Up Date onto a deal_flow entry (used by the "watch" email). */
+export async function updateFollowUpDate(entryId: string, dateISO: string): Promise<void> {
+  await api(
+    `/lists/${DEAL_FLOW_SLUG}/entries/${entryId}`,
+    { data: { entry_values: { follow_up_date: dateISO } } },
+    "PATCH"
+  );
+}
+
 // ---------- value extractors (Attio wraps every value in a versioned array) ----------
 
 const first = (v: any): any => (Array.isArray(v) && v.length ? v[0] : undefined);
@@ -277,6 +286,13 @@ export interface ResolvedPerson {
   jobTitle?: string;
 }
 
+/** A team/linked contact email — includes nameless stubs, for recipient deduction. */
+export interface ResolvedContact {
+  name?: string;
+  email: string;
+  role?: string;
+}
+
 export interface AttioNote {
   title: string;
   date?: string;
@@ -305,6 +321,8 @@ export interface AttioResolution {
   dealFlowEntryId?: string;
   allCompanyRecordIds: string[];
   people: ResolvedPerson[];
+  /** All team/linked contact emails (incl. nameless stubs) for recipient deduction. */
+  contactEmails: ResolvedContact[];
   emails: string[];
   dealFlow?: DealFlow;
   notes: AttioNote[];
@@ -559,6 +577,7 @@ export async function resolveEntity(
       found: false,
       allCompanyRecordIds: [],
       people: [],
+      contactEmails: [],
       emails: [],
       notes: [],
       candidatesConsidered: 0,
@@ -658,14 +677,24 @@ export async function resolveEntity(
   //  (b) people from the name search whose linked company IS the featured company,
   //  (c) the plausible founder-people themselves (founder-name query).
   const peopleMap = new Map<string, ResolvedPerson>();
+  // Every team/linked contact's email, even nameless stubs (a nameless
+  // "j@company.com" is often exactly the founder we want). Kept separate from
+  // `people` so display isn't polluted, but available to recipient deduction.
+  const contactPool = new Map<string, ResolvedContact>();
   const addPerson = (rec: any, roleFallback?: string) => {
     const id = recordId(rec);
     if (!id || peopleMap.has(id)) return;
     const emails = recordEmails(rec);
+    const role = selectVal(rec.values?.job_title) || textVal(rec.values?.job_title) || roleFallback;
+    const rawName = recordName(rec);
+    for (const e of emails) {
+      const key = e.toLowerCase();
+      if (!contactPool.has(key)) contactPool.set(key, { name: rawName, email: e, role });
+    }
     // Attio often has nameless "stub" people (enriched from an email only). Recover
     // a display name from the email rather than showing "Unknown"; skip only if
     // there's neither a name nor an email to go on.
-    const name = recordName(rec) || nameFromEmail(emails[0]);
+    const name = rawName || nameFromEmail(emails[0]);
     if (!name) return;
     peopleMap.set(id, {
       name,
@@ -775,6 +804,7 @@ export async function resolveEntity(
     dealFlowEntryId: dealEntryId,
     allCompanyRecordIds: candidateCompanies.map((c) => recordId(c)),
     people: displayPeople,
+    contactEmails: [...contactPool.values()],
     emails,
     dealFlow,
     notes,

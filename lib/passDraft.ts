@@ -54,6 +54,18 @@ const CLOSE_LOOP_SHORT = `{source_first} — thank you for the intro to {founder
 Best,
 Zann`;
 
+// "Keep in touch" — explicitly NOT a pass. An open door, forward-looking.
+const WATCH_KEEP_IN_TOUCH = `Hey {first_name},
+
+Thanks again for taking the time to meet, and for sharing {company} with us. I really enjoyed the conversation and learning about what you're building.
+
+We're not in a position to move forward right now, but I'd genuinely love to stay close as you continue to build. Please keep me posted on your progress and any big milestones, and don't hesitate to reach out if there's anything I can help with along the way.
+
+Looking forward to staying in touch.
+
+Warmly,
+Zann`;
+
 // How each pass reason should steer the sticking-point language.
 const REASON_GUIDE: Record<string, string> = {
   "Market size": "the market feeling too small / early / niche for a venture-scale outcome",
@@ -64,6 +76,9 @@ const REASON_GUIDE: Record<string, string> = {
 
 function fillGenericPass(firstName: string): string {
   return GENERIC_PASS.replace("{first_name}", firstName || "there");
+}
+function fillWatch(firstName: string, company: string): string {
+  return WATCH_KEEP_IN_TOUCH.replace("{first_name}", firstName || "there").replace("{company}", company || "your company");
 }
 function fillCloseLoop(sourceFirst: string, founder: string, company: string, short = false): string {
   const t = short ? CLOSE_LOOP_SHORT : CLOSE_LOOP_LONG;
@@ -117,6 +132,27 @@ ${CLOSE_LOOP_LONG}
 
 Shorter variant:
 ${CLOSE_LOOP_SHORT}`;
+
+const WATCH_SYSTEM = `You draft a warm "keep in touch" email from Zann (2048 Ventures, a pre-seed fund) to a founder 2048 met but is NOT investing in right now.
+
+CRUCIAL: this is NOT a pass or rejection. Never say it "won't be a fit", that 2048 "decided not to invest", or anything that reads as a no. It is an OPEN DOOR — 2048 isn't moving right now (framed as timing), but genuinely wants to stay close and follow the journey.
+
+Structure:
+1. "Hey {first name}," on its own line.
+2. Thank them for their time / for sharing the company; a genuine, specific note about the conversation or team.
+3. Say 2048 isn't in a position to move forward right now (timing), and that you'd love to stay close and keep in touch as they build.
+4. Invite them to keep you posted on progress and milestones, and to reach out if you can help in the meantime.
+5. Warm close, sign off exactly:
+Warmly,
+Zann
+
+Hard rules:
+- Never phrase this as a pass, rejection, or "not a fit".
+- NEVER use em dashes (—). No AI-slop. Zann's warm, plain, first-person voice.
+- Output ONLY the email body (greeting through "Zann"). No subject, no preamble.
+
+Template to match:
+${WATCH_KEEP_IN_TOUCH}`;
 
 async function callModel(system: string, user: string, maxTokens: number): Promise<string | null> {
   const key = process.env.ANTHROPIC_API_KEY;
@@ -197,6 +233,42 @@ export async function draftPassEmail(input: PassDraftInput): Promise<string> {
     .join("\n");
 
   const out = await callModel(PASS_SYSTEM, user, 1200);
+  return out || fallback;
+}
+
+export interface WatchDraftInput {
+  company: string;
+  founderFirstName: string;
+  founderFullName?: string;
+  callPoints?: string[];
+  transcript?: string;
+  customInstructions?: string;
+}
+
+/** Draft the "keep in touch" (watch) email — never a pass. Generic template by
+ *  default; tailored only when Zann adds custom instructions. */
+export async function draftWatchEmail(input: WatchDraftInput): Promise<string> {
+  const fallback = fillWatch(input.founderFirstName, input.company);
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key || !input.customInstructions?.trim()) return fallback;
+
+  const user = [
+    `Company: ${input.company}`,
+    input.founderFirstName
+      ? `Founder first name: ${input.founderFirstName}`
+      : `Founder first name: (unknown — greet neutrally, e.g. "Hi there,")`,
+    input.founderFullName ? `Founder: ${input.founderFullName}` : "",
+    `Extra instructions from Zann (follow these):\n${input.customInstructions}`,
+    input.callPoints && input.callPoints.length
+      ? `Call summary points (context, do not copy verbatim):\n${input.callPoints.map((p) => `- ${p}`).join("\n")}`
+      : "",
+    "",
+    "Draft the keep-in-touch email now. Remember: this is NOT a pass — keep the door open and warm.",
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
+
+  const out = await callModel(WATCH_SYSTEM, user, 900);
   return out || fallback;
 }
 
