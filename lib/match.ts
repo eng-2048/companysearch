@@ -14,6 +14,17 @@ export function normalize(s: string): string {
     .trim();
 }
 
+/**
+ * Strip everything but letters and digits: "Pin 24" / "pin24" / "Pin-24" all
+ * become "pin24". Used for space- and punctuation-insensitive name comparison,
+ * where Attio's byte-literal `$contains` would otherwise miss (a user types
+ * "pin24" but the record is stored "Pin 24"). Unlike normalize(), it also drops
+ * whitespace, so it must NOT be used as a whole-word matcher.
+ */
+export function squish(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 /** "16:15" -> "4:15 PM". Formats a 24h HH:MM string as 12-hour with AM/PM. */
 export function to12h(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);

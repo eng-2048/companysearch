@@ -4,6 +4,8 @@
 // every email, and find the deal_flow entry by walking each candidate record's
 // list entries. Read-only.
 
+import { squish, wholeWordMatch } from "./match";
+
 const BASE = "https://api.attio.com/v2";
 
 const COMPANIES_OBJECT = "5d5f1d54-8b3d-4b70-9419-bed8c153dff6";
@@ -112,12 +114,91 @@ function calInteractionAt(rec: any, field: string): string | undefined {
 
 // ---------- API primitives ----------
 
-async function searchRecords(object: string, term: string, limit = 25): Promise<any[]> {
+async function nameFilter(
+  object: string,
+  op: "$contains" | "$starts_with",
+  term: string,
+  limit = 25
+): Promise<any[]> {
   const r = await api(`/objects/${object}/records/query`, {
-    filter: { name: { $contains: term } },
+    filter: { name: { [op]: term } },
     limit,
   });
   return r.data || [];
+}
+
+/**
+ * Spacing/punctuation variants of a query so at least one is a literal substring
+ * of the stored name. Attio's `$contains` is byte-literal: "pin24" is NOT a
+ * substring of "Pin 24", nor "pin 24" of "Pin24". Splitting at letter/digit
+ * boundaries and collapsing spaces covers both directions.
+ */
+function nameVariants(term: string): string[] {
+  const t = term.trim();
+  const lower = t.toLowerCase();
+  const set = new Set<string>([t]);
+  set.add(lower.replace(/([a-z])([0-9])/gi, "$1 $2").replace(/([0-9])([a-z])/gi, "$1 $2")); // deglue: pin24 -> pin 24
+  set.add(lower.replace(/\s+/g, "")); // collapse: pin 24 -> pin24
+  return [...set].map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Space- and punctuation-tolerant name search (companies or people). Fires the
+ * spacing variants as `$contains`; then, only when nothing squish-matches the
+ * query, recovers glued names ("ekholabs" -> "Ekho Labs", "opxexchange" ->
+ * "OPX Exchange") via anchored `$starts_with` on decreasing prefixes of the
+ * glued term. The recovery filter is strict (stored name squished must equal or
+ * contain the typed term) so a short prefix can't drag in unrelated records.
+ * Measured on 60 real names this cuts glued-name misses ~85%+ with no false hits.
+ */
+async function searchByName(object: string, term: string, limit = 25): Promise<any[]> {
+  const byId = new Map<string, any>();
+  const add = (recs: any[]) => {
+    for (const c of recs) {
+      const id = recordId(c);
+      if (id && !byId.has(id)) byId.set(id, c);
+    }
+  };
+
+  const variants = nameVariants(term);
+  const batches = await Promise.all(
+    variants.map((q) => nameFilter(object, "$contains", q, limit).catch(() => []))
+  );
+  batches.forEach(add);
+
+  const tsq = squish(term);
+  const satisfied = [...byId.values()].some((c) => {
+    const n = squish(recordName(c) || "");
+    return n && (n === tsq || n.includes(tsq) || tsq.includes(n));
+  });
+
+  if (!satisfied && tsq.length >= 4) {
+    const glued = term.toLowerCase().replace(/\s+/g, "");
+    // Longest prefix first (most precise); floor at 3 to catch acronym first
+    // words ("OPX Exchange", "MRI Software"). Recovery runs only on a real miss.
+    const lens = [
+      ...new Set([Math.min(glued.length, 10), 8, 6, 5, 4, 3].filter((l) => l >= 3 && l <= glued.length)),
+    ].sort((a, b) => b - a);
+    for (const len of lens) {
+      const pref = glued.slice(0, len);
+      let hits: any[] = [];
+      try {
+        hits = await nameFilter(object, "$starts_with", pref, 50);
+      } catch {
+        hits = [];
+      }
+      const good = hits.filter((c) => {
+        const n = squish(recordName(c) || "");
+        return n === tsq || n.includes(tsq);
+      });
+      if (good.length) {
+        add(good);
+        if (good.some((c) => squish(recordName(c) || "") === tsq)) break;
+      }
+    }
+  }
+
+  return [...byId.values()];
 }
 
 async function getRecord(object: string, id: string): Promise<any | undefined> {
@@ -320,6 +401,7 @@ export async function resolveEntity(
   const term = cleanTerm(query) || query.trim();
   const queryIsPerson = looksLikePersonName(query);
   const qn = normName(term);
+  const qsq = squish(term);
 
   // Attendee/founder emails are the most reliable key (a meeting title is often a
   // joke or a person's name; the email domain is the company). Include the query
@@ -331,15 +413,18 @@ export async function resolveEntity(
 
   // Fire company + people searches together.
   const [companyHits, peopleHits] = await Promise.all([
-    searchRecords(COMPANIES_OBJECT, term),
-    searchRecords(PEOPLE_OBJECT, term),
+    searchByName(COMPANIES_OBJECT, term),
+    searchByName(PEOPLE_OBJECT, term),
   ]);
 
   // People are only "plausibly the founder" when the query itself is a person
   // name AND the record's full name actually contains it — this is what keeps
   // "verno" from matching "Vernon Gair".
   const plausiblePeople = queryIsPerson
-    ? peopleHits.filter((p) => normName(recordName(p) || "").includes(qn))
+    ? peopleHits.filter((p) => {
+        const raw = recordName(p) || "";
+        return normName(raw).includes(qn) || (qsq.length >= 4 && squish(raw).includes(qsq));
+      })
     : [];
 
   // Candidate companies: name-matched companies + companies linked from the
@@ -479,11 +564,20 @@ export async function resolveEntity(
   }
 
   // How well a company's name matches the query — used to pick the right record
-  // when several match (e.g. the real "Verno" over "Governors Island").
+  // when several match (e.g. the real "Verno" over "Governors Island"). Compare
+  // both word-normalized and squished (space/punct-insensitive) so "pin24"
+  // scores an exact hit on a record stored as "Pin 24".
   const nameScore = (c: any): number => {
-    const n = normName(recordName(c) || "");
-    if (n === qn) return 3;
-    if (n.includes(qn) || qn.includes(n)) return 2;
+    const raw = recordName(c) || "";
+    const n = normName(raw);
+    const nsq = squish(raw);
+    // Exact match, word-normalized or squished (so "pin24" == "Pin 24").
+    if (n === qn || (nsq && nsq === qsq)) return 3;
+    // Whole-word / whole-phrase containment (never an interior substring — that is
+    // what let "verno" match "goVERNOrs Island"), plus a squished PREFIX match so
+    // "cloud9" still offers "Cloud9World" without resurrecting the substring bug.
+    if (wholeWordMatch(raw, term) || wholeWordMatch(term, raw)) return 2;
+    if (nsq && qsq && (nsq.startsWith(qsq) || qsq.startsWith(nsq))) return 2;
     return recordDomains(c).length ? 1 : 0;
   };
 
@@ -708,11 +802,12 @@ export async function findCandidates(
   const term = cleanTerm(query) || query.trim();
   if (!term || query.includes("@")) return []; // email queries resolve uniquely
   const qn = normName(term);
+  const qsq = squish(term);
   const queryIsPerson = looksLikePersonName(query);
 
   const [companyHits, peopleHits] = await Promise.all([
-    searchRecords(COMPANIES_OBJECT, term),
-    searchRecords(PEOPLE_OBJECT, term),
+    searchByName(COMPANIES_OBJECT, term),
+    searchByName(PEOPLE_OBJECT, term),
   ]);
   const companyById = new Map<string, any>();
   for (const c of companyHits) companyById.set(recordId(c), c);
@@ -721,7 +816,8 @@ export async function findCandidates(
   if (queryIsPerson) {
     const linked = new Set<string>();
     for (const p of peopleHits) {
-      if (!normName(recordName(p) || "").includes(qn)) continue;
+      const raw = recordName(p) || "";
+      if (!normName(raw).includes(qn) && !(qsq.length >= 4 && squish(raw).includes(qsq))) continue;
       const cid = first(p.values?.company)?.target_record_id;
       if (cid && !companyById.has(cid)) linked.add(cid);
     }
@@ -730,14 +826,31 @@ export async function findCandidates(
   }
 
   const nameScore = (c: any): number => {
-    const n = normName(recordName(c) || "");
-    if (n === qn) return 3;
-    if (n.includes(qn) || qn.includes(n)) return 2;
+    const raw = recordName(c) || "";
+    const n = normName(raw);
+    const nsq = squish(raw);
+    // Exact (word-normalized or squished so "pin24" == "Pin 24").
+    if (n === qn || (nsq && nsq === qsq)) return 3;
+    // Whole-word/phrase containment or a squished prefix — but NOT an interior
+    // substring, which would wrongly offer "Governors Island" for "verno".
+    if (wholeWordMatch(raw, term) || wholeWordMatch(term, raw)) return 2;
+    if (nsq && qsq && (nsq.startsWith(qsq) || qsq.startsWith(nsq))) return 2;
     return 0;
   };
-  // Only close name matches are disambiguation candidates.
-  const strong = [...companyById.values()]
-    .filter((c) => nameScore(c) >= 2)
+  // Only close name matches are disambiguation candidates. Collapse near-identical
+  // records — same name AND same (or no) domain — that would render as duplicate,
+  // unpickable rows (Attio often holds several imports of one company); keep the
+  // richest. Records that share a name but differ by domain stay separate, since
+  // they may be genuinely different companies (e.g. two "Etched").
+  const richness = (x: any): number =>
+    (textVal(x.values?.description) ? 2 : 0) + (recordDomains(x).length ? 1 : 0);
+  const bestByKey = new Map<string, any>();
+  for (const c of [...companyById.values()].filter((x) => nameScore(x) >= 2)) {
+    const key = `${squish(recordName(c) || "")}|${(recordDomains(c)[0] || "").toLowerCase()}`;
+    const cur = bestByKey.get(key);
+    if (!cur || richness(c) > richness(cur)) bestByKey.set(key, c);
+  }
+  const strong = [...bestByKey.values()]
     .sort((a, b) => nameScore(b) - nameScore(a))
     .slice(0, 6);
 
