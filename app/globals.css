@@ -1543,3 +1543,69 @@ a:hover {
   cursor: pointer;
 }
 .fe-undo:hover { text-decoration: underline; }
+
+/* ---------- Pass/Follow-Up: card ✕ bubble, Pass/Watch, draft screen, multi-To ---------- */
+.pfu-card { position: relative; }
+.pfu-x-bubble {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.pfu-x-bubble:hover { border-color: var(--red); color: var(--red); background: var(--bg-elev); }
+
+.pfu-intro.owe { color: var(--amber); }
+
+/* draft screen */
+.pfu-ds-intro {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.pfu-ds-intro strong { color: var(--text); }
+.pfu-owe { color: var(--amber); }
+.pfu-noloop { color: var(--text-faint); }
+
+/* multiple To recipients */
+.cmp-to { align-items: center; }
+.cmp-to-x {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cmp-to-x:hover { border-color: var(--red); color: var(--red); }
+.cmp-to + .cmp-to { margin-top: 6px; }
+.cmp-add-to {
+  margin-top: 8px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.cmp-add-to:hover { border-color: var(--accent-dim); color: var(--text); }
+.cmp-cand:disabled { opacity: 0.4; cursor: default; }

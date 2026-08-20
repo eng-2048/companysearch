@@ -273,6 +273,8 @@ export interface PassItem {
   recipient: PassRecipient;
   closeLoopEligible: boolean;
   introducer?: PassIntroducer;
+  introText?: string; // "Serene Papenfuss · VC" / "List" — shown on the card
+
   meeting?: PassMeetingRef; // recent-meeting rows carry this so drafting can find Grain
 }
 

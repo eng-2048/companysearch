@@ -231,6 +231,16 @@ function passItemFromAttio(
   const founder = founderRaw && !company.includes(founderRaw) ? founderRaw : undefined;
   const { introducer, eligible } = introducerFrom(attio);
 
+  // A display label for the intro, ALWAYS (even for List/LinkedIn channels, which
+  // aren't close-the-loop eligible) so the user can see whether a loop is owed.
+  const d = attio.dealFlow;
+  const introName = d?.introDByName?.trim();
+  const introType = d?.introDByType?.trim();
+  const introText =
+    introName && introType && normalize(introName) !== normalize(introType)
+      ? `${introName} · ${introType}`
+      : introName || introType || undefined;
+
   return {
     section: opts.section,
     dealFlowEntryId: opts.entryId || attio.dealFlowEntryId,
@@ -245,6 +255,7 @@ function passItemFromAttio(
     recipient: deduceRecipient(attio, opts.meeting?.attendees || []),
     closeLoopEligible: eligible,
     introducer,
+    introText,
     meeting: opts.meeting,
   };
 }
