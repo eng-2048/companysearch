@@ -4,6 +4,7 @@ import { gatherContext } from "@/lib/gather";
 import { Links, PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { readDayCache, writeDayCache } from "@/lib/dayCache";
 import { resolveLink } from "@/lib/attioLinks";
+import { normalize } from "@/lib/match";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,22 @@ const isCompanyDomain = (email: string): boolean => {
   const dom = email.split("@")[1]?.toLowerCase();
   return !!dom && !GENERIC_DOMAINS.has(dom) && !/\.(edu|ac\.[a-z]{2})$/.test(dom);
 };
+
+// A generic inbox local part isn't a person's name.
+const GENERIC_LOCALS = new Set([
+  "info", "team", "hello", "hi", "hey", "contact", "sales", "admin", "support",
+  "help", "careers", "press", "invest", "deals", "founders", "founder", "ir", "pr",
+]);
+
+/** A person's name from an email local part: anthony@alpa.ca → "Anthony";
+ *  john.smith@x.com → "John Smith". Undefined for generic inboxes. */
+function nameFromEmailLocal(email?: string): string | undefined {
+  const local = email?.split("@")[0]?.toLowerCase();
+  if (!local || GENERIC_LOCALS.has(local)) return undefined;
+  const parts = local.split(/[._-]+/).filter((p) => p && !/^\d+$/.test(p) && p.length > 1);
+  if (!parts.length) return undefined;
+  return parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(" ");
+}
 
 interface Resolved {
   attioId?: string;
@@ -73,10 +90,14 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
     return dom && dom !== INTERNAL_DOMAIN;
   });
   const emailHints = externals.map((a) => a.email!).filter(Boolean);
-  // The person we're meeting — prefer a full name, else any attendee name.
+  // The person we're meeting — prefer a real calendar name, else derive it from
+  // their email (anthony@alpa.ca → "Anthony"). Ignore a display name that's just
+  // the email address.
+  const isRealName = (n?: string) => !!n && !n.includes("@");
   const attendeeName =
-    externals.find((a) => a.name && /\s/.test(a.name))?.name ||
-    externals.find((a) => a.name)?.name;
+    externals.find((a) => isRealName(a.name) && /\s/.test(a.name!))?.name ||
+    externals.find((a) => isRealName(a.name))?.name;
+  const derivedFirst = nameFromEmailLocal(emailHints[0]);
 
   // Only a match that actually landed on an Attio record counts.
   let r: Resolved | null = null;
@@ -123,13 +144,23 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
   }
 
   const company = r?.company && !r.company.includes("@") ? r.company : m.term;
+  // The founder shown should be the person in THIS meeting (the attendee), not
+  // whatever contact happens to be primary on the Attio record. Use Attio's fuller
+  // name only when it's the same person (its first name matches the attendee's).
+  let founder = attendeeName;
+  if (!founder) {
+    const rfFirst = r?.founder ? normalize(r.founder).split(" ")[0] : "";
+    const dfFirst = derivedFirst ? normalize(derivedFirst).split(" ")[0] : "";
+    if (derivedFirst && rfFirst && rfFirst === dfFirst) founder = r!.founder; // same person, fuller name
+    else founder = derivedFirst || r?.founder || company;
+  }
   return {
     time: m.time,
     upcoming: m.upcoming,
     title: m.title,
     attendees: m.attendees,
     company,
-    founder: attendeeName || r?.founder || company,
+    founder,
     status: r?.status,
     dealFlowEntryId: r?.dealFlowEntryId,
     attioId: r?.attioId,
