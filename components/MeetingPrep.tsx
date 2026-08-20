@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { to12h } from "@/lib/match";
-import StatusSelect, { statusClass } from "@/components/StatusSelect";
+import StatusSelect from "@/components/StatusSelect";
 
 /** Shown on a meeting we couldn't match to Attio — paste the record URL to link it
  *  (remembered everywhere). Triggers a re-scan so the card fills in. */
@@ -13,7 +13,8 @@ function LinkToAttio({ m, onLinked }: { m: PrepEntry; onLinked: () => void }) {
 
   async function link() {
     const url = window.prompt(
-      `Paste the Attio record URL for “${m.company || m.title}”:`,
+      `Paste the Attio deal record URL for “${m.company || m.title}” ` +
+        `(the company in your deal flow):`,
       "https://app.attio.com/2048-ventures/company/"
     );
     if (!url || !url.trim()) return;
@@ -41,7 +42,7 @@ function LinkToAttio({ m, onLinked }: { m: PrepEntry; onLinked: () => void }) {
   return (
     <span className="pc-link-attio">
       <button className="prep-back" onClick={link} disabled={busy} type="button">
-        {busy ? "Linking…" : "＋ Link to Attio"}
+        {busy ? "Linking…" : "＋ Link to deal"}
       </button>
       {err && <span className="save-ind err">{err}</span>}
     </span>
@@ -82,9 +83,9 @@ function PrepCard({ m, onRelink }: { m: PrepEntry; onRelink: () => void }) {
               status={m.status || ""}
               forwardStatuses={FORWARD_STATUSES}
             />
-          ) : m.attioId ? (
-            m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>
           ) : (
+            // Not attached to deal_flow (Attio may still have found a company, but
+            // it isn't in our pipeline) — let the user link the right deal record.
             <LinkToAttio m={m} onLinked={onRelink} />
           )}
         </div>
