@@ -1609,3 +1609,18 @@ a:hover {
 }
 .cmp-add-to:hover { border-color: var(--accent-dim); color: var(--text); }
 .cmp-cand:disabled { opacity: 0.4; cursor: default; }
+
+/* Form Entry dismiss bar: hide-for-now → permanently remove */
+.fe-dismissed-actions { display: flex; align-items: center; gap: 14px; }
+.fe-perm {
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fe-perm:hover { background: rgba(248, 113, 113, 0.12); }
+.fe-dismissed strong { color: var(--text); }

@@ -156,18 +156,38 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [hidden, setHidden] = useState(false); // ✕ = hide for this session
+  const [perm, setPerm] = useState(false); // permanently removed (persisted)
 
-  async function dismiss(undo = false) {
-    setDismissed(!undo);
+  // ✕ just hides the row for now; "Permanently remove" persists it so it stays
+  // gone across refreshes (until a future meeting with the same person/company,
+  // which gets a different key).
+  async function permanentlyRemove() {
+    setPerm(true);
     try {
       await fetch("/api/form-entry/dismiss", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: m.key, undo }),
+        body: JSON.stringify({ key: m.key }),
       });
     } catch {
-      /* best-effort; the row is already hidden/restored optimistically */
+      setPerm(false);
+    }
+  }
+  async function undo() {
+    const wasPerm = perm;
+    setHidden(false);
+    setPerm(false);
+    if (wasPerm) {
+      try {
+        await fetch("/api/form-entry/dismiss", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: m.key, undo: true }),
+        });
+      } catch {
+        /* best-effort */
+      }
     }
   }
 
@@ -201,13 +221,28 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
   const label =
     [m.person, m.company].filter(Boolean).join(" · ") || m.company || m.person || m.term;
 
-  if (dismissed) {
+  if (hidden) {
     return (
       <div className="fe-dismissed">
-        <span>“{label}” marked not needed.</span>
-        <button className="fe-undo" onClick={() => dismiss(true)} type="button">
-          Undo
-        </button>
+        <span>
+          {perm ? (
+            <>
+              “{label}” <strong>permanently removed</strong>.
+            </>
+          ) : (
+            <>“{label}” hidden for now.</>
+          )}
+        </span>
+        <div className="fe-dismissed-actions">
+          {!perm && (
+            <button className="fe-perm" onClick={permanentlyRemove} type="button">
+              Permanently remove
+            </button>
+          )}
+          <button className="fe-undo" onClick={undo} type="button">
+            Undo
+          </button>
+        </div>
       </div>
     );
   }
@@ -235,9 +270,9 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
           )}
           <button
             className="fe-x"
-            onClick={() => dismiss()}
+            onClick={() => setHidden(true)}
             type="button"
-            title="Not needed — remove from the list"
+            title="Hide — then choose to permanently remove"
           >
             ✕
           </button>
