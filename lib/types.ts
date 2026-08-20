@@ -184,6 +184,7 @@ export interface FormEntryListItem {
   term: string; // the title-derived term — used as the draft resolution key
   attendees: { name?: string; email?: string }[];
   key: string; // stable id for the manual "not needed" dismiss store
+  recordId?: string; // resolved Attio company id — matched against submitted forms
 }
 
 export interface FormEntryList {

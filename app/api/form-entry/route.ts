@@ -2,22 +2,22 @@ import { NextRequest } from "next/server";
 import { listRecentMeetings } from "@/lib/formEntry";
 import { readDayCache, writeDayCache } from "@/lib/dayCache";
 import { readDismissed } from "@/lib/formDismiss";
-import { submittedCompanyKeys } from "@/lib/airtable";
-import { squish } from "@/lib/match";
+import { submittedSubmissions, isSubmitted } from "@/lib/airtable";
 import { FormEntryList } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Drop meetings the user marked "not needed", and (when Airtable is connected)
-// meetings whose Deal Feedback form was already submitted. Applied at serve time —
-// not baked into the day cache — so a dismiss or a fresh submission takes effect on
-// the next load without a full re-scan.
+// meetings whose Deal Feedback form was already submitted — matched by the Attio
+// record id in the submission (reliable), with a company-name fallback. Applied at
+// serve time (not cached) so a dismiss or a fresh submission takes effect on the
+// next load without a full re-scan.
 async function applyTodoFilters(list: FormEntryList): Promise<FormEntryList> {
   if (!list.configured || !list.meetings?.length) return list;
-  const [dismissed, submitted] = await Promise.all([readDismissed(), submittedCompanyKeys()]);
+  const [dismissed, submitted] = await Promise.all([readDismissed(), submittedSubmissions()]);
   const meetings = list.meetings.filter(
-    (m) => !dismissed.has(m.key) && !(m.company && submitted.has(squish(m.company)))
+    (m) => !dismissed.has(m.key) && !isSubmitted(submitted, m.recordId, m.company)
   );
   return { ...list, meetings };
 }

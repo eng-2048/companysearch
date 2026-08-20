@@ -429,6 +429,8 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
         // Stable id for the dismiss store — date + the resolved company (or the
         // person/term when unresolved), so dismissing one meeting is durable.
         key: hashKey(`${date}|${squish(company || person || m.term)}`),
+        // The Attio record id — the reliable key for matching a submitted form.
+        recordId: resolved?.attio.featuredCompany?.recordId,
       };
     })
   );
