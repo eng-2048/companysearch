@@ -455,9 +455,35 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
   const [open, setOpen] = useState(false);
   const [emailType, setEmailType] = useState<"pass" | "watch">("pass");
   const [removed, setRemoved] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  async function dismiss(undo = false) {
+    setDismissed(!undo);
+    try {
+      await fetch("/api/pass-follow-up/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: item.recordId, undo }),
+      });
+    } catch {
+      /* best-effort; the card is already hidden/restored optimistically */
+    }
+  }
+
   if (removed) return null;
 
   const founderLine = item.founder && !item.company.includes(item.founder) ? ` · ${item.founder}` : "";
+
+  if (dismissed) {
+    return (
+      <div className="fe-dismissed">
+        <span>“{item.company}” — no email needed.</span>
+        <button className="fe-undo" onClick={() => dismiss(true)} type="button">
+          Undo
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="pfu-card">
@@ -504,6 +530,14 @@ function PassCard({ item, testRecipient }: { item: PassItem; testRecipient: stri
             Attio ↗
           </a>
         )}
+        <button
+          className="fe-x pfu-x"
+          onClick={() => dismiss()}
+          type="button"
+          title="No email needed — remove from the list"
+        >
+          ✕
+        </button>
       </div>
 
       {open && (
