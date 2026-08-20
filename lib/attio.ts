@@ -18,22 +18,53 @@ function key(): string {
   return k;
 }
 
+// Bounded concurrency + retry. The bulk scans (Pass/Follow-Up, Meeting Prep) fire
+// hundreds of Attio reads at once; without this, Attio rate-limits (429) and the
+// swallowed failures surfaced as EMPTY fields (a deal with a real status showing
+// "— set status —", and Pass/Closed deals escaping the status filter). Capping
+// in-flight requests and retrying transient errors makes every read reliable.
+const MAX_CONCURRENT = 12;
+let active = 0;
+const waiters: (() => void)[] = [];
+async function acquire(): Promise<void> {
+  while (active >= MAX_CONCURRENT) await new Promise<void>((r) => waiters.push(r));
+  active++;
+}
+function release(): void {
+  active--;
+  waiters.shift()?.();
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function api(path: string, body?: unknown, method?: string): Promise<any> {
-  const res = await fetch(BASE + path, {
-    method: method || (body === undefined ? "GET" : "POST"),
-    headers: {
-      Authorization: `Bearer ${key()}`,
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    // Attio is external; never cache CRM reads.
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Attio ${path} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
+  await acquire();
+  try {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(BASE + path, {
+        method: method || (body === undefined ? "GET" : "POST"),
+        headers: {
+          Authorization: `Bearer ${key()}`,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        // Attio is external; never cache CRM reads.
+        cache: "no-store",
+      });
+      if (res.ok) return await res.json();
+
+      // Retry transient rate-limit / server errors with backoff (max 5 tries).
+      if ((res.status === 429 || res.status >= 500) && attempt < 4) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const wait = retryAfter > 0 ? retryAfter * 1000 : 300 * 2 ** attempt + Math.random() * 150;
+        await sleep(wait);
+        continue;
+      }
+      const text = await res.text().catch(() => "");
+      throw new Error(`Attio ${path} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+  } finally {
+    release();
   }
-  return res.json();
 }
 
 const DEAL_FLOW_STATUS_ATTR = "9eb938eb-af9f-4f5e-8a26-ba2616b42a60";
