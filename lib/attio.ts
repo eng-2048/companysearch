@@ -972,6 +972,12 @@ export async function listDealsByStatus(
   return out;
 }
 
+/** The display name of a company record (for confirming a manual Attio link). */
+export async function getCompanyName(recordIdStr: string): Promise<string | undefined> {
+  const rec = await getRecord(COMPANIES_OBJECT, recordIdStr);
+  return rec ? recordName(rec) : undefined;
+}
+
 /** Name + first email for a single person record (the introducer, resolved for
  *  the close-the-loop email). Returns undefined fields when the record or email
  *  is missing. */

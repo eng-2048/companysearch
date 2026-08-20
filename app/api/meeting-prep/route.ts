@@ -3,6 +3,7 @@ import { getMultiDayMeetings, DayMeeting, companyTermsForEmail } from "@/lib/sug
 import { gatherContext } from "@/lib/gather";
 import { Links, PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { readDayCache, writeDayCache } from "@/lib/dayCache";
+import { resolveLink } from "@/lib/attioLinks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,9 +35,13 @@ interface Resolved {
   links: PrepLinks;
 }
 
-async function attioResolve(term: string, emailHints: string[]): Promise<Resolved | null> {
+async function attioResolve(
+  term: string,
+  emailHints: string[],
+  recordId?: string
+): Promise<Resolved | null> {
   try {
-    const b = await gatherContext(term, { attioOnly: true, emailHints });
+    const b = await gatherContext(term, { attioOnly: true, emailHints, recordId });
     const L: Links = b.links;
     return {
       attioId: b.identity.attioCompanyId,
@@ -76,14 +81,22 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
   // Only a match that actually landed on an Attio record counts.
   let r: Resolved | null = null;
 
-  // 1. Company-domain emails are the strongest, unambiguous key.
-  for (const email of emailHints.filter(isCompanyDomain)) {
-    const rr = await attioResolve(email, [email]);
-    if (rr?.attioId) {
-      r = rr;
-      break;
-    }
+  // 0. A manual "link to Attio" the user set for this meeting overrides everything.
+  const linkedId = await resolveLink(m.title, m.attendees);
+  if (linkedId) {
+    const rr = await attioResolve("", emailHints, linkedId);
+    if (rr?.attioId) r = rr;
   }
+
+  // 1. Company-domain emails are the strongest, unambiguous key.
+  if (!r)
+    for (const email of emailHints.filter(isCompanyDomain)) {
+      const rr = await attioResolve(email, [email]);
+      if (rr?.attioId) {
+        r = rr;
+        break;
+      }
+    }
 
   // 2. Personal/school email (no domain match) → cross-reference the person's
   // OTHER calendar meetings, whose titles often carry the company
@@ -119,6 +132,7 @@ async function resolveMeeting(m: DayMeeting): Promise<PrepEntry> {
     founder: attendeeName || r?.founder || company,
     status: r?.status,
     dealFlowEntryId: r?.dealFlowEntryId,
+    attioId: r?.attioId,
     description: r?.description,
     links: r?.links || {},
   };

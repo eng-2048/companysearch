@@ -13,6 +13,7 @@ import { resolveGrain, getTranscript } from "./grain";
 import { draftNotes, extractEquity, extractRound } from "./notesDraft";
 import { normalize, squish } from "./match";
 import { hashKey } from "./dayCache";
+import { resolveLink } from "./attioLinks";
 import {
   FormEntryList,
   FormEntryMeeting,
@@ -103,6 +104,18 @@ export async function resolveToAttio(
   };
 
   let attio: AttioResolution | null = null;
+
+  // 0. A manual "link to Attio" the user set for this meeting overrides everything.
+  const linkedId = await resolveLink(m.title, m.attendees);
+  if (linkedId) {
+    try {
+      const a = await resolveEntity("", { recordId: linkedId });
+      if (a.found && a.featuredCompany) return { attio: a, attendeeName };
+    } catch {
+      /* fall through to automatic resolution */
+    }
+  }
+
   // 1. Company-domain email — the strongest, unambiguous key.
   for (const email of emailHints.filter(isCompanyDomain)) {
     attio = await tryResolve(email, [email]);

@@ -1,8 +1,52 @@
 "use client";
 
+import { useState } from "react";
 import { PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import StatusSelect, { statusClass } from "@/components/StatusSelect";
+
+/** Shown on a meeting we couldn't match to Attio — paste the record URL to link it
+ *  (remembered everywhere). Triggers a re-scan so the card fills in. */
+function LinkToAttio({ m, onLinked }: { m: PrepEntry; onLinked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function link() {
+    const url = window.prompt(
+      `Paste the Attio record URL for “${m.company || m.title}”:`,
+      "https://app.attio.com/2048-ventures/company/"
+    );
+    if (!url || !url.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/attio-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: m.title, attendees: m.attendees, url: url.trim() }),
+      });
+      const j = await res.json();
+      if (!j.ok) {
+        setErr(j.error || "Link failed");
+        setBusy(false);
+        return;
+      }
+      onLinked(); // re-scan; the card resolves to the linked record
+    } catch {
+      setErr("Link failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="pc-link-attio">
+      <button className="prep-back" onClick={link} disabled={busy} type="button">
+        {busy ? "Linking…" : "＋ Link to Attio"}
+      </button>
+      {err && <span className="save-ind err">{err}</span>}
+    </span>
+  );
+}
 
 const LINK_LABELS: [keyof PrepLinks, string][] = [
   ["deck", "Deck"],
@@ -18,7 +62,7 @@ const LINK_LABELS: [keyof PrepLinks, string][] = [
 // or move it to Watch (which prompts for a follow-up date). Exact Attio titles.
 const FORWARD_STATUSES = ["1st Screen", "Deep Dive", "Diligence", "Watch"];
 
-function PrepCard({ m }: { m: PrepEntry }) {
+function PrepCard({ m, onRelink }: { m: PrepEntry; onRelink: () => void }) {
   const links = LINK_LABELS.filter(([k]) => m.links[k]);
   return (
     <div className="prep-card">
@@ -38,8 +82,10 @@ function PrepCard({ m }: { m: PrepEntry }) {
               status={m.status || ""}
               forwardStatuses={FORWARD_STATUSES}
             />
-          ) : (
+          ) : m.attioId ? (
             m.status && <span className={`pill ${statusClass(m.status)}`}>{m.status}</span>
+          ) : (
+            <LinkToAttio m={m} onLinked={onRelink} />
           )}
         </div>
         {m.description && <div className="pc-desc">{m.description}</div>}
@@ -145,7 +191,7 @@ export default function MeetingPrep({
             {day.meetings.length === 0 ? (
               <div className="prep-day-empty">No external meetings.</div>
             ) : (
-              day.meetings.map((m, i) => <PrepCard m={m} key={i} />)
+              day.meetings.map((m, i) => <PrepCard m={m} key={i} onRelink={onRefresh} />)
             )}
           </div>
         ))}

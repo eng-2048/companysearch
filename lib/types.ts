@@ -143,6 +143,7 @@ export interface PrepEntry {
   founder: string;
   status?: string;
   dealFlowEntryId?: string; // present when the status is editable
+  attioId?: string; // the resolved Attio company id — absent when unmatched
   description?: string;
   links: PrepLinks;
 }
