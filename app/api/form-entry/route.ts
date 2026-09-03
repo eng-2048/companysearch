@@ -16,9 +16,11 @@ export const dynamic = "force-dynamic";
 async function applyTodoFilters(list: FormEntryList): Promise<FormEntryList> {
   if (!list.configured || !list.meetings?.length) return list;
   const [dismissed, submitted] = await Promise.all([readDismissed(), submittedSubmissions()]);
-  const meetings = list.meetings.filter(
-    (m) => !dismissed.has(m.key) && !isSubmitted(submitted, m.recordId, m.company)
-  );
+  // Drop already-submitted forms entirely; keep manually-removed ones but flag
+  // them so the UI can list them in a "Removed" section (resuscitatable).
+  const meetings = list.meetings
+    .filter((m) => !isSubmitted(submitted, m.recordId, m.company))
+    .map((m) => ({ ...m, dismissed: dismissed.has(m.key) }));
   return { ...list, meetings };
 }
 
@@ -26,7 +28,7 @@ async function applyTodoFilters(list: FormEntryList): Promise<FormEntryList> {
 // re-opening / navigating back is instant; `?refresh=1` re-scans. The expensive
 // Attio + Grain resolution still happens per meeting via POST /api/form-entry/draft.
 export async function GET(req: NextRequest) {
-  const numDays = Number(req.nextUrl.searchParams.get("days") ?? 3);
+  const numDays = Number(req.nextUrl.searchParams.get("days") ?? 5);
   const refresh = req.nextUrl.searchParams.get("refresh") === "1";
   const cacheKey = `form-entry-list-d${numDays}`;
 

@@ -185,6 +185,7 @@ export interface FormEntryListItem {
   attendees: { name?: string; email?: string }[];
   key: string; // stable id for the manual "not needed" dismiss store
   recordId?: string; // resolved Attio company id — matched against submitted forms
+  dismissed?: boolean; // manually removed — shown in the "Removed" section
 }
 
 export interface FormEntryList {

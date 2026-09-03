@@ -151,45 +151,14 @@ function DraftCard({ m }: { m: FormEntryMeeting }) {
   );
 }
 
-function MeetingRow({ m }: { m: FormEntryListItem }) {
+const labelOf = (m: FormEntryListItem) =>
+  [m.person, m.company].filter(Boolean).join(" · ") || m.company || m.person || m.term;
+
+function MeetingRow({ m, onDismiss }: { m: FormEntryListItem; onDismiss: () => void }) {
   const [draft, setDraft] = useState<FormDraftResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [hidden, setHidden] = useState(false); // ✕ = hide for this session
-  const [perm, setPerm] = useState(false); // permanently removed (persisted)
-
-  // ✕ just hides the row for now; "Permanently remove" persists it so it stays
-  // gone across refreshes (until a future meeting with the same person/company,
-  // which gets a different key).
-  async function permanentlyRemove() {
-    setPerm(true);
-    try {
-      await fetch("/api/form-entry/dismiss", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: m.key }),
-      });
-    } catch {
-      setPerm(false);
-    }
-  }
-  async function undo() {
-    const wasPerm = perm;
-    setHidden(false);
-    setPerm(false);
-    if (wasPerm) {
-      try {
-        await fetch("/api/form-entry/dismiss", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: m.key, undo: true }),
-        });
-      } catch {
-        /* best-effort */
-      }
-    }
-  }
 
   async function runDraft() {
     setLoading(true);
@@ -217,35 +186,7 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
   }
 
   const who = m.attendees.map((a) => a.name || a.email).filter(Boolean).join(", ");
-  // Row label: "Person · Company" — never the internal title-derived term.
-  const label =
-    [m.person, m.company].filter(Boolean).join(" · ") || m.company || m.person || m.term;
-
-  if (hidden) {
-    return (
-      <div className="fe-dismissed">
-        <span>
-          {perm ? (
-            <>
-              “{label}” <strong>permanently removed</strong>.
-            </>
-          ) : (
-            <>“{label}” hidden for now.</>
-          )}
-        </span>
-        <div className="fe-dismissed-actions">
-          {!perm && (
-            <button className="fe-perm" onClick={permanentlyRemove} type="button">
-              Permanently remove
-            </button>
-          )}
-          <button className="fe-undo" onClick={undo} type="button">
-            Undo
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const label = labelOf(m);
 
   return (
     <div className="fe-card">
@@ -270,9 +211,9 @@ function MeetingRow({ m }: { m: FormEntryListItem }) {
           )}
           <button
             className="fe-x"
-            onClick={() => setHidden(true)}
+            onClick={onDismiss}
             type="button"
-            title="Hide — then choose to permanently remove"
+            title="Remove — moves to the Removed section at the bottom"
           >
             ✕
           </button>
@@ -320,10 +261,29 @@ export default function FormEntry({
   onClose: () => void;
 }) {
   const updated = fmtUpdated(data?.generatedAt);
+  // Optimistic override of each row's persisted "dismissed" flag (✕ / Restore).
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const isRemoved = (m: FormEntryListItem) => overrides[m.key] ?? !!m.dismissed;
 
-  // group the flat list by day
+  async function setDismiss(m: FormEntryListItem, dismissed: boolean) {
+    setOverrides((prev) => ({ ...prev, [m.key]: dismissed }));
+    try {
+      await fetch("/api/form-entry/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: m.key, undo: !dismissed }),
+      });
+    } catch {
+      /* optimistic; the store write is best-effort */
+    }
+  }
+
+  const all = data?.meetings ?? [];
+  const active = all.filter((m) => !isRemoved(m));
+  const removed = all.filter((m) => isRemoved(m));
+
   const byDay = new Map<string, FormEntryListItem[]>();
-  for (const m of data?.meetings ?? []) {
+  for (const m of active) {
     if (!byDay.has(m.date)) byDay.set(m.date, []);
     byDay.get(m.date)!.push(m);
   }
@@ -332,7 +292,7 @@ export default function FormEntry({
     <div className="prep">
       <div className="prep-head">
         <div className="prep-title">
-          <h2>Form Entry · last 3 days</h2>
+          <h2>Form Entry · last 5 days</h2>
           {updated && <span className="prep-updated">{updated}</span>}
         </div>
         <div className="prep-actions">
@@ -347,9 +307,10 @@ export default function FormEntry({
 
       <p className="fe-note">
         Your running to-do list of forms to submit. Hit <strong>Draft form</strong> to draft the
-        First Meeting Deal Feedback form and open it pre-filled, or <strong>✕</strong> to drop a
-        meeting that doesn&apos;t need one. Meetings whose form is already submitted in Airtable
-        fall off automatically.
+        First Meeting Deal Feedback form and open it pre-filled, or <strong>✕</strong> to move a
+        meeting that doesn&apos;t need one to the <strong>Removed</strong> section below (you can
+        restore it there). Meetings whose form is already submitted in Airtable fall off
+        automatically.
       </p>
 
       {loading && !data && (
@@ -363,8 +324,12 @@ export default function FormEntry({
         <div className="empty-note">Google Calendar isn&apos;t connected.</div>
       )}
 
-      {!loading && data && data.configured && data.meetings.length === 0 && (
-        <div className="empty-note">No external meetings in the last 3 days.</div>
+      {!loading && data && data.configured && all.length === 0 && (
+        <div className="empty-note">No external meetings in the last 5 days.</div>
+      )}
+
+      {!loading && data && data.configured && all.length > 0 && active.length === 0 && (
+        <div className="empty-note">All caught up — no forms left to submit.</div>
       )}
 
       {!loading &&
@@ -373,10 +338,30 @@ export default function FormEntry({
           <div className="prep-day" key={date}>
             <div className="prep-day-head">{fmtDate(date)}</div>
             {meetings.map((m) => (
-              <MeetingRow m={m} key={keyOf(m)} />
+              <MeetingRow m={m} key={keyOf(m)} onDismiss={() => setDismiss(m, true)} />
             ))}
           </div>
         ))}
+
+      {!loading && removed.length > 0 && (
+        <div className="prep-day fe-removed-section">
+          <div className="prep-day-head">Removed · {removed.length}</div>
+          {removed.map((m) => (
+            <div className="fe-removed-row" key={keyOf(m)}>
+              <div className="fe-removed-info">
+                <span className="fe-removed-label">{labelOf(m)}</span>
+                <span className="fe-removed-when">
+                  {fmtDate(m.date)}
+                  {m.time ? ` · ${to12h(m.time)}` : ""}
+                </span>
+              </div>
+              <button className="fe-undo" onClick={() => setDismiss(m, false)} type="button">
+                Restore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

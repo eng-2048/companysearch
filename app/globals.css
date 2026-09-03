@@ -1624,3 +1624,21 @@ a:hover {
 }
 .fe-perm:hover { background: rgba(248, 113, 113, 0.12); }
 .fe-dismissed strong { color: var(--text); }
+
+/* Form Entry: "Removed" section at the bottom (dimmed, restorable) */
+.fe-removed-section { margin-top: 28px; opacity: 0.8; }
+.fe-removed-section .prep-day-head { color: var(--text-faint); }
+.fe-removed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+.fe-removed-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fe-removed-label { color: var(--text-dim); font-size: 14px; }
+.fe-removed-when { color: var(--text-faint); font-size: 12px; }
