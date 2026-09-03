@@ -87,7 +87,16 @@ export interface DayMeeting {
 function eventToDayMeeting(ev: GCalEvent, teamTokens: string[]): DayMeeting | null {
   if (/^grain data for/i.test(ev.title)) return null;
   if (/\[\s*hold\s*\]/i.test(ev.title)) return null; // calendar hold, not a meeting
-  const attendees = ev.attendees || [];
+
+  // The organizer is often the founder who created the invite but isn't listed as
+  // an attendee (e.g. "Zann / David (Edgerun)" whose only attendee is Zann). Fold
+  // a real external organizer into the attendee list so the meeting isn't dropped.
+  const attendees = [...(ev.attendees || [])];
+  const orgEmail = ev.organizerEmail?.toLowerCase();
+  const isRealOrganizer = !!orgEmail && orgEmail.includes("@") && !/calendar\.google\.com$/.test(orgEmail);
+  if (isRealOrganizer && !attendees.some((a) => (a.email || "").toLowerCase() === orgEmail)) {
+    attendees.push({ email: ev.organizerEmail, organizer: true });
+  }
   if (attendees.length === 0 || attendees.length > 12) return null;
 
   const internalTokens = new Set<string>(teamTokens);
