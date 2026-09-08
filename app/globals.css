@@ -1642,3 +1642,60 @@ a:hover {
 .fe-removed-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fe-removed-label { color: var(--text-dim); font-size: 14px; }
 .fe-removed-when { color: var(--text-faint); font-size: 12px; }
+
+/* ---------- Ask box (company Q&A over materials) ---------- */
+.ask {
+  margin-top: 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.ask-head {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.ask-bar { display: flex; gap: 10px; }
+.ask-bar input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--sans);
+}
+.ask-bar input:focus { outline: none; border-color: var(--accent-dim); }
+.ask-bar button {
+  background: var(--accent);
+  color: #08111f;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ask-bar button:disabled { opacity: 0.55; cursor: default; }
+.ask-hint { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
+
+.ask-qa { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.ask-q { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.ask-q::before { content: "Q  "; color: var(--text-faint); font-weight: 400; }
+.ask-a {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.ask-used {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 8px;
+}
+.ask-note { font-size: 13.5px; color: var(--amber); }

@@ -1,0 +1,94 @@
+"use client";
+
+import { useState } from "react";
+import { ContextBundle } from "@/lib/types";
+
+interface QA {
+  q: string;
+  a?: string;
+  used?: string[];
+  note?: string;
+  loading: boolean;
+}
+
+export default function AskBox({ bundle }: { bundle: ContextBundle }) {
+  const [q, setQ] = useState("");
+  const [history, setHistory] = useState<QA[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  async function ask() {
+    const question = q.trim();
+    if (!question || busy) return;
+    setBusy(true);
+    setQ("");
+    const idx = history.length;
+    setHistory((h) => [...h, { q: question, loading: true }]);
+    try {
+      const res = await fetch("/api/search/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, bundle }),
+      });
+      const j = await res.json();
+      setHistory((h) =>
+        h.map((item, i) =>
+          i === idx
+            ? { q: question, a: j.answer, used: j.used, note: j.ok ? undefined : j.note, loading: false }
+            : item
+        )
+      );
+    } catch {
+      setHistory((h) =>
+        h.map((item, i) => (i === idx ? { q: question, note: "Request failed.", loading: false } : item))
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="ask">
+      <div className="ask-head">Ask about {bundle.company}</div>
+      <form
+        className="ask-bar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          ask();
+        }}
+      >
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Ask anything — e.g. “what did they say about competition?”, “how big is the round?”"
+          disabled={busy}
+        />
+        <button type="submit" disabled={busy || !q.trim()}>
+          {busy ? "Thinking…" : "Ask"}
+        </button>
+      </form>
+      <div className="ask-hint">
+        Answers only from the materials on file — the Grain call transcript, notes, and emails. The
+        deck file isn&apos;t read yet.
+      </div>
+
+      {[...history].reverse().map((item, i) => (
+        <div className="ask-qa" key={history.length - 1 - i}>
+          <div className="ask-q">{item.q}</div>
+          {item.loading ? (
+            <div className="status-line">
+              <span className="spinner" />
+              <span>Reading the transcript and materials…</span>
+            </div>
+          ) : item.a ? (
+            <>
+              <div className="ask-a">{item.a}</div>
+              {item.used?.length ? <div className="ask-used">Sources: {item.used.join(" · ")}</div> : null}
+            </>
+          ) : (
+            <div className="ask-note">⚠ {item.note}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}

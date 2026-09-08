@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { ContextBundle, SearchEvent, PrepResult, FormEntryList, PassFollowUpList, SearchCandidate } from "@/lib/types";
 import { to12h } from "@/lib/match";
 import ResultCard from "@/components/ResultCard";
+import AskBox from "@/components/AskBox";
 import MeetingPrep from "@/components/MeetingPrep";
 import FormEntry from "@/components/FormEntry";
 import PassFollowUp from "@/components/PassFollowUp";
@@ -318,6 +319,9 @@ export default function Home() {
       )}
 
       {bundle && <ResultCard bundle={bundle} />}
+      {bundle && (
+        <AskBox key={bundle.identity?.attioCompanyId || bundle.company} bundle={bundle} />
+      )}
         </div>
         <div hidden={!formMode}>
           <FormEntry
