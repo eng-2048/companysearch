@@ -5,6 +5,7 @@
 // a Drive/Docsend login) — but the transcript usually covers the deck walkthrough.
 
 import { getTranscript } from "./grain";
+import { deckTextFromUrl } from "./drive";
 import { ContextBundle } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -99,10 +100,18 @@ export async function answerQuestion(bundle: ContextBundle, question: string): P
     : "";
   if (bundle.emailThread?.messages?.length) used.push("email thread");
 
+  // Read the actual deck from Drive when possible; otherwise note why.
   const deckUrl = bundle.links?.deck?.value;
-  const deckNote = deckUrl
-    ? `A pitch deck exists (${deckUrl}) but its file isn't directly readable (hosted behind a login). Its content is usually walked through on the Grain call above.`
-    : "No deck on file.";
+  const deck = await deckTextFromUrl(deckUrl);
+  let deckSection: string;
+  if (deck.accessible && deck.text) {
+    deckSection = `## Deck (extracted from the actual file${deck.name ? `: ${deck.name}` : ""})\n${deck.text}`;
+    used.push("deck");
+  } else {
+    deckSection = deckUrl
+      ? `## Deck\nA pitch deck exists (${deckUrl}) but wasn't read: ${deck.note || "not accessible"}. Its content is usually walked through on the Grain call above.`
+      : `## Deck\nNo deck on file.`;
+  }
 
   const materials = [
     `# Materials for ${bundle.company}`,
@@ -111,7 +120,7 @@ export async function answerQuestion(bundle: ContextBundle, question: string): P
     grainSummaries ? `## Grain call summaries\n${grainSummaries}` : "",
     notes ? `## Attio notes\n${notes}` : "",
     email ? `## Email thread\n${email}` : "",
-    `## Deck\n${deckNote}`,
+    deckSection,
     `## Full Grain transcript(s)\n${transcripts || "(none available)"}`,
   ]
     .filter(Boolean)

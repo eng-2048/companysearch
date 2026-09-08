@@ -67,8 +67,8 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
         </button>
       </form>
       <div className="ask-hint">
-        Answers only from the materials on file — the Grain call transcript, notes, and emails. The
-        deck file isn&apos;t read yet.
+        Answers only from the materials on file — the Grain call transcript, the deck (when saved in
+        Drive), notes, and emails.
       </div>
 
       {[...history].reverse().map((item, i) => (

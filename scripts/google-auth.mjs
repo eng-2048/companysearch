@@ -23,7 +23,8 @@ const REDIRECT = "http://localhost:5555/oauth2callback";
 const SCOPE = [
   "https://www.googleapis.com/auth/calendar.readonly", // read the calendar
   "https://www.googleapis.com/auth/gmail.readonly", // read the email thread
-  "https://www.googleapis.com/auth/gmail.compose", // draft + send follow-ups (future)
+  "https://www.googleapis.com/auth/gmail.compose", // draft + send follow-ups
+  "https://www.googleapis.com/auth/drive.readonly", // read decks saved in Drive
 ].join(" ");
 
 function readEnv() {
