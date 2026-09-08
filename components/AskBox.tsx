@@ -68,7 +68,7 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
       </form>
       <div className="ask-hint">
         Answers only from the materials on file — the Grain call transcript, the deck (when saved in
-        Drive), notes, and emails.
+        Drive), notes, emails, and the #deals-{"{company}"} Slack channel.
       </div>
 
       {[...history].reverse().map((item, i) => (

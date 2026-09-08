@@ -6,6 +6,7 @@
 
 import { getTranscript } from "./grain";
 import { deckTextFromUrl } from "./drive";
+import { slackContextForCompany } from "./slack";
 import { ContextBundle } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -21,7 +22,7 @@ export interface AskResult {
   note?: string; // error / status when !ok
 }
 
-const SYSTEM = `You answer a VC's (2048 Ventures) questions about one company, using ONLY the provided materials — Grain call transcript(s) and summaries, Attio notes, the email thread, and the deal facts.
+const SYSTEM = `You answer a VC's (2048 Ventures) questions about one company, using ONLY the provided materials — Grain call transcript(s) and summaries, Attio notes, the email thread, the team's Slack channel for the deal, the deck, and the deal facts.
 
 Rules:
 - Lead with the answer, then a sentence or two of support. Concise; plain text with short paragraphs or bullets.
@@ -113,6 +114,20 @@ export async function answerQuestion(bundle: ContextBundle, question: string): P
       : `## Deck\nNo deck on file.`;
   }
 
+  // Slack #deals-<company> channel (verified against the Attio link posted there).
+  let slackSection = "";
+  try {
+    const slack = await slackContextForCompany(bundle.company, id.attioCompanyId);
+    if (slack.found && slack.text) {
+      slackSection = `## Slack channel (${slack.channelName}${slack.verified === "name-only" ? ", name-matched" : ", verified"})\n${slack.text}`;
+      used.push("Slack channel");
+    } else if (slack.found && slack.note) {
+      slackSection = `## Slack channel\n${slack.note}`;
+    }
+  } catch {
+    /* Slack is best-effort */
+  }
+
   const materials = [
     `# Materials for ${bundle.company}`,
     `## Facts\n${facts}`,
@@ -120,6 +135,7 @@ export async function answerQuestion(bundle: ContextBundle, question: string): P
     grainSummaries ? `## Grain call summaries\n${grainSummaries}` : "",
     notes ? `## Attio notes\n${notes}` : "",
     email ? `## Email thread\n${email}` : "",
+    slackSection,
     deckSection,
     `## Full Grain transcript(s)\n${transcripts || "(none available)"}`,
   ]
