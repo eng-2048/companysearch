@@ -7,6 +7,7 @@
 import { getTranscript } from "./grain";
 import { deckTextFromUrl } from "./drive";
 import { slackContextForCompany } from "./slack";
+import { retrieve, isBroadQuestion, Source } from "./retrieve";
 import { ContextBundle } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -104,43 +105,70 @@ export async function answerQuestion(bundle: ContextBundle, question: string): P
   // Read the actual deck from Drive when possible; otherwise note why.
   const deckUrl = bundle.links?.deck?.value;
   const deck = await deckTextFromUrl(deckUrl);
-  let deckSection: string;
+  let deckRaw = ""; // the readable deck body, if any
+  let deckNote: string; // shown when the body isn't retrieved (or as a fallback)
   if (deck.accessible && deck.text) {
-    deckSection = `## Deck (extracted from the actual file${deck.name ? `: ${deck.name}` : ""})\n${deck.text}`;
+    deckRaw = deck.text;
+    deckNote = `## Deck\nA readable deck is on file${deck.name ? ` (${deck.name})` : ""}; relevant excerpts appear below when they bear on the question.`;
     used.push("deck");
   } else {
-    deckSection = deckUrl
+    deckNote = deckUrl
       ? `## Deck\nA pitch deck exists (${deckUrl}) but wasn't read: ${deck.note || "not accessible"}. Its content is usually walked through on the Grain call above.`
       : `## Deck\nNo deck on file.`;
   }
 
   // Slack #deals-<company> channel (verified against the Attio link posted there).
-  let slackSection = "";
+  let slackRaw = "";
+  let slackNote = "";
+  let slackLabel = "Slack channel";
   try {
     const slack = await slackContextForCompany(bundle.company, id.attioCompanyId);
     if (slack.found && slack.text) {
-      slackSection = `## Slack channel (${slack.channelName}${slack.verified === "name-only" ? ", name-matched" : ", verified"})\n${slack.text}`;
+      slackRaw = slack.text;
+      slackLabel = `Slack ${slack.channelName}${slack.verified === "name-only" ? " (name-matched)" : ""}`;
       used.push("Slack channel");
     } else if (slack.found && slack.note) {
-      slackSection = `## Slack channel\n${slack.note}`;
+      slackNote = `## Slack channel\n${slack.note}`;
     }
   } catch {
     /* Slack is best-effort */
   }
 
-  const materials = [
+  // The compact sources are always sent in full — they're small and high-signal.
+  const compact = [
     `# Materials for ${bundle.company}`,
     `## Facts\n${facts}`,
     people ? `## People\n${people}` : "",
     grainSummaries ? `## Grain call summaries\n${grainSummaries}` : "",
     notes ? `## Attio notes\n${notes}` : "",
     email ? `## Email thread\n${email}` : "",
-    slackSection,
-    deckSection,
-    `## Full Grain transcript(s)\n${transcripts || "(none available)"}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    slackNote,
+    deckNote,
+  ].filter(Boolean);
+
+  // The heavy sources (transcript, deck body, Slack history) are large. For a
+  // specific question we send only the chunks that hit the query terms — much
+  // cheaper. Broad questions ("summarize", "walk me through") get the full text.
+  const heavy: Source[] = [
+    transcripts ? { label: "Grain transcript(s)", text: transcripts } : null,
+    deckRaw ? { label: "Deck", text: deckRaw } : null,
+    slackRaw ? { label: slackLabel, text: slackRaw } : null,
+  ].filter(Boolean) as Source[];
+
+  let heavySection: string;
+  if (isBroadQuestion(question) || !heavy.length) {
+    heavySection = heavy
+      .map((s) => `## ${s.label} (full)\n${s.text}`)
+      .join("\n\n");
+  } else {
+    const r = retrieve(heavy, question);
+    heavySection = r.hits
+      ? r.text
+      : // Nothing matched the query terms — fall back to full so we never miss.
+        heavy.map((s) => `## ${s.label} (full)\n${s.text}`).join("\n\n");
+  }
+
+  const materials = [...compact, heavySection].filter(Boolean).join("\n\n");
 
   const user = `${materials}\n\n---\nQuestion: ${question}\n\nAnswer using only the materials above.`;
 
