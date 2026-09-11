@@ -93,7 +93,6 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
   if (b.identity.capitalRaised) facts.push({ k: "Raised", v: b.identity.capitalRaised });
   if (introBy) facts.push({ k: "Intro'd by", v: introBy });
   if (b.identity.location && facts.length < 4) facts.push({ k: "Location", v: b.identity.location });
-  const factCols = Math.min(facts.length, 4) || 1;
 
   // Visual timeline: intro, then meetings oldest → newest.
   const introDate = b.emailThread?.messages[0]?.date;
@@ -124,7 +123,7 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
 
       {/* ---- Facts strip ---- */}
       {facts.length > 0 && (
-        <div className="facts" style={{ gridTemplateColumns: `repeat(${factCols}, 1fr)` }}>
+        <div className="facts">
           {facts.map((f) => (
             <div className="fact" key={f.k}>
               <div className="k">{f.k}</div>
@@ -139,13 +138,13 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
 
       {/* ---- Links ---- */}
       <div className="links">
-        <LinkChip icon="📊" label="Deck" link={b.links.deck} />
+        <LinkChip icon="Dk" label="Deck" link={b.links.deck} />
         <LinkChip icon="in" label="CEO LinkedIn" link={b.links.ceoLinkedin} />
         <LinkChip icon="in" label="CTO LinkedIn" link={b.links.ctoLinkedin} />
-        <LinkChip icon="🌐" label="Website" link={b.links.website} />
-        <LinkChip icon="📁" label="Deal folder" link={b.links.dealFolder} />
-        {b.regime === "past" && <LinkChip icon="🎬" label="Recording" link={b.links.recording} />}
-        <LinkChip icon="📇" label="Attio Record" link={b.links.attioRecord} />
+        <LinkChip icon="Wb" label="Website" link={b.links.website} />
+        <LinkChip icon="Dl" label="Deal folder" link={b.links.dealFolder} />
+        {b.regime === "past" && <LinkChip icon="Rc" label="Recording" link={b.links.recording} />}
+        <LinkChip icon="At" label="Attio Record" link={b.links.attioRecord} />
       </div>
 
       {/* ---- Expander ---- */}

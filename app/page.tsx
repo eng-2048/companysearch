@@ -181,10 +181,11 @@ export default function Home() {
     <div className="wrap">
       <div className="masthead">
         <div className="brandbar">
-          <span className="brand-plate">
+          <span className="brand-clip">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/2048-ventures.jpg" alt="2048 Ventures" />
+            <img src="/2048-logo.jpg" alt="2048 Ventures" />
           </span>
+          <span className="brand-div" />
           <span className="app-title">Company&nbsp;Search</span>
         </div>
         <nav className="seg" aria-label="Views">
@@ -282,8 +283,8 @@ export default function Home() {
 
       {candidates && !bundle && (
         <div className="candidates">
-          <div className="cand-hint">
-            A few records match &ldquo;{candidates.query}&rdquo; — pick the right one:
+          <div className="rowdiv">
+            <span>Which record?</span>
           </div>
           {candidates.options.map((o) => (
             <button
@@ -311,6 +312,11 @@ export default function Home() {
         </div>
       )}
 
+      {bundle && (
+        <div className="rowdiv">
+          <span>Result</span>
+        </div>
+      )}
       {bundle && <ResultCard bundle={bundle} />}
       {bundle && (
         <AskBox key={bundle.identity?.attioCompanyId || bundle.company} bundle={bundle} />

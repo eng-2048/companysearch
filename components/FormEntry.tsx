@@ -213,9 +213,9 @@ function MeetingRow({ m, onDismiss }: { m: FormEntryListItem; onDismiss: () => v
             className="fe-x"
             onClick={onDismiss}
             type="button"
-            title="Remove — moves to the Removed section at the bottom"
+            title="Dismiss — moves to the Dismissed section at the bottom"
           >
-            ✕
+            Dismiss
           </button>
         </div>
       </div>
@@ -337,7 +337,7 @@ export default function FormEntry({
 
       {!loading && removed.length > 0 && (
         <div className="prep-day fe-removed-section">
-          <div className="prep-day-head">Removed · {removed.length}</div>
+          <div className="prep-day-head">Dismissed · {removed.length}</div>
           {removed.map((m) => (
             <div className="fe-removed-row" key={keyOf(m)}>
               <div className="fe-removed-info">
