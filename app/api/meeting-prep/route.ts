@@ -4,7 +4,12 @@ import { gatherContext } from "@/lib/gather";
 import { Links, PrepEntry, PrepLinks, PrepResult } from "@/lib/types";
 import { readDayCache, writeDayCache } from "@/lib/dayCache";
 import { resolveLink } from "@/lib/attioLinks";
+import { readDismissed } from "@/lib/prepDismiss";
 import { normalize } from "@/lib/match";
+
+// Stable per-meeting id for the dismiss store — must match the client's keyOf.
+const prepKey = (date: string, e: { time?: string; title: string }) =>
+  `${date}|${e.time || ""}|${e.title}`;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -174,33 +179,47 @@ export async function GET(req: NextRequest) {
   const refresh = req.nextUrl.searchParams.get("refresh") === "1";
   const cacheKey = `meeting-prep-d${numDays}`;
 
+  let result: PrepResult | null = null;
+  let generatedAt = new Date().toISOString();
+  let cached = false;
+
   // Serve today's cached scan unless a refresh was asked for.
   if (!refresh) {
-    const cached = await readDayCache<PrepResult>(cacheKey);
-    if (cached) {
-      return Response.json({ ...cached.value, generatedAt: cached.generatedAt, cached: true });
+    const c = await readDayCache<PrepResult>(cacheKey);
+    if (c) {
+      result = c.value;
+      generatedAt = c.generatedAt;
+      cached = true;
     }
   }
 
-  const { configured, days } = await getMultiDayMeetings(numDays);
+  if (!result) {
+    const { configured, days } = await getMultiDayMeetings(numDays);
 
-  // Resolve every meeting across all days in parallel, then regroup by day.
-  const flat = days.flatMap((d) => d.meetings.map((m) => ({ date: d.date, m })));
-  const resolved = await Promise.all(
-    flat.map(async ({ date, m }) => ({ date, entry: await resolveMeeting(m) }))
-  );
+    // Resolve every meeting across all days in parallel, then regroup by day.
+    const flat = days.flatMap((d) => d.meetings.map((m) => ({ date: d.date, m })));
+    const resolved = await Promise.all(
+      flat.map(async ({ date, m }) => ({ date, entry: await resolveMeeting(m) }))
+    );
 
-  const byDate = new Map<string, PrepEntry[]>(days.map((d) => [d.date, []]));
-  for (const { date, entry } of resolved) byDate.get(date)!.push(entry);
+    const byDate = new Map<string, PrepEntry[]>(days.map((d) => [d.date, []]));
+    for (const { date, entry } of resolved) byDate.get(date)!.push(entry);
 
-  const generatedAt = new Date().toISOString();
-  const result: PrepResult = {
-    configured,
-    days: days.map((d) => ({ date: d.date, meetings: byDate.get(d.date) || [] })),
-  };
+    result = {
+      configured,
+      days: days.map((d) => ({ date: d.date, meetings: byDate.get(d.date) || [] })),
+    };
 
-  // Cache a real scan (don't persist an unconfigured/no-calendar result — retry next time).
-  if (configured) await writeDayCache(cacheKey, result, generatedAt);
+    // Cache a real scan (don't persist an unconfigured/no-calendar result — retry next time).
+    if (configured) await writeDayCache(cacheKey, result, generatedAt);
+  }
 
-  return Response.json({ ...result, generatedAt, cached: false });
+  // Apply the manual "dismissed" flags every request (kept outside the day cache
+  // so dismissing/restoring takes effect without a re-scan).
+  const dismissed = await readDismissed();
+  for (const day of result.days) {
+    for (const e of day.meetings) e.dismissed = dismissed.has(prepKey(day.date, e));
+  }
+
+  return Response.json({ ...result, generatedAt, cached });
 }

@@ -146,6 +146,7 @@ export interface PrepEntry {
   attioId?: string; // the resolved Attio company id — absent when unmatched
   description?: string;
   links: PrepLinks;
+  dismissed?: boolean; // manually removed — shown in the "Dismissed" section
 }
 
 export interface PrepDay {

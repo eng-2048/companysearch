@@ -63,7 +63,15 @@ const LINK_LABELS: [keyof PrepLinks, string][] = [
 // or move it to Watch (which prompts for a follow-up date). Exact Attio titles.
 const FORWARD_STATUSES = ["1st Screen", "Deep Dive", "Diligence", "Watch"];
 
-function PrepCard({ m, onRelink }: { m: PrepEntry; onRelink: () => void }) {
+function PrepCard({
+  m,
+  onRelink,
+  onDismiss,
+}: {
+  m: PrepEntry;
+  onRelink: () => void;
+  onDismiss: () => void;
+}) {
   const links = LINK_LABELS.filter(([k]) => m.links[k]);
   return (
     <div className="prep-card">
@@ -77,17 +85,27 @@ function PrepCard({ m, onRelink }: { m: PrepEntry; onRelink: () => void }) {
             {m.company}
             {m.founder && !m.company.includes(m.founder) ? ` · ${m.founder}` : ""}
           </h3>
-          {m.dealFlowEntryId ? (
-            <StatusSelect
-              entryId={m.dealFlowEntryId}
-              status={m.status || ""}
-              forwardStatuses={FORWARD_STATUSES}
-            />
-          ) : (
-            // Not attached to deal_flow (Attio may still have found a company, but
-            // it isn't in our pipeline) — let the user link the right deal record.
-            <LinkToAttio m={m} onLinked={onRelink} />
-          )}
+          <div className="pc-head-actions">
+            {m.dealFlowEntryId ? (
+              <StatusSelect
+                entryId={m.dealFlowEntryId}
+                status={m.status || ""}
+                forwardStatuses={FORWARD_STATUSES}
+              />
+            ) : (
+              // Not attached to deal_flow (Attio may still have found a company, but
+              // it isn't in our pipeline) — let the user link the right deal record.
+              <LinkToAttio m={m} onLinked={onRelink} />
+            )}
+            <button
+              className="fe-x"
+              onClick={onDismiss}
+              type="button"
+              title="Dismiss — moves to the Dismissed section at the bottom"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
         {m.description && <div className="pc-desc">{m.description}</div>}
         {links.length > 0 ? (
@@ -152,6 +170,31 @@ export default function MeetingPrep({
   const totalMeetings = data?.days.reduce((n, d) => n + d.meetings.length, 0) ?? 0;
   const updated = fmtUpdated(data?.generatedAt);
 
+  // Optimistic override of each meeting's persisted "dismissed" flag (Dismiss / Restore).
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const keyOf = (date: string, m: PrepEntry) => `${date}|${m.time || ""}|${m.title}`;
+  const isRemoved = (date: string, m: PrepEntry) => overrides[keyOf(date, m)] ?? !!m.dismissed;
+
+  async function setDismiss(date: string, m: PrepEntry, dismissed: boolean) {
+    const key = keyOf(date, m);
+    setOverrides((prev) => ({ ...prev, [key]: dismissed }));
+    try {
+      await fetch("/api/meeting-prep/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, undo: !dismissed }),
+      });
+    } catch {
+      /* optimistic; the store write is best-effort */
+    }
+  }
+
+  const removed: { m: PrepEntry; date: string }[] = [];
+  for (const day of data?.days ?? []) {
+    for (const m of day.meetings) if (isRemoved(day.date, m)) removed.push({ m, date: day.date });
+  }
+  const activeTotal = totalMeetings - removed.length;
+
   return (
     <div className="prep">
       <div className="prep-head">
@@ -184,18 +227,57 @@ export default function MeetingPrep({
         <div className="empty-note">No external meetings in the next 3 days.</div>
       )}
 
+      {!loading && data && data.configured && totalMeetings > 0 && activeTotal === 0 && (
+        <div className="empty-note">All caught up — every meeting dismissed.</div>
+      )}
+
       {!loading &&
         data &&
-        data.days.map((day) => (
-          <div className="prep-day" key={day.date}>
-            <div className="prep-day-head">{fmtDate(day.date)}</div>
-            {day.meetings.length === 0 ? (
-              <div className="prep-day-empty">No external meetings.</div>
-            ) : (
-              day.meetings.map((m, i) => <PrepCard m={m} key={i} onRelink={onRefresh} />)
-            )}
-          </div>
-        ))}
+        data.days.map((day) => {
+          const active = day.meetings.filter((m) => !isRemoved(day.date, m));
+          // Hide a day whose meetings were all dismissed.
+          if (day.meetings.length > 0 && active.length === 0) return null;
+          return (
+            <div className="prep-day" key={day.date}>
+              <div className="prep-day-head">{fmtDate(day.date)}</div>
+              {day.meetings.length === 0 ? (
+                <div className="prep-day-empty">No external meetings.</div>
+              ) : (
+                active.map((m) => (
+                  <PrepCard
+                    m={m}
+                    key={keyOf(day.date, m)}
+                    onRelink={onRefresh}
+                    onDismiss={() => setDismiss(day.date, m, true)}
+                  />
+                ))
+              )}
+            </div>
+          );
+        })}
+
+      {!loading && removed.length > 0 && (
+        <div className="prep-day fe-removed-section">
+          <div className="prep-day-head">Dismissed · {removed.length}</div>
+          {removed.map(({ m, date }) => (
+            <div className="fe-removed-row" key={keyOf(date, m)}>
+              <div className="fe-removed-info">
+                <span className="fe-removed-label">
+                  {m.company}
+                  {m.founder && !m.company.includes(m.founder) ? ` · ${m.founder}` : ""}
+                </span>
+                <span className="fe-removed-when">
+                  {fmtDate(date)}
+                  {m.time ? ` · ${to12h(m.time)}` : ""}
+                </span>
+              </div>
+              <button className="fe-undo" onClick={() => setDismiss(date, m, false)} type="button">
+                Restore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

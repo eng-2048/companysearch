@@ -1877,6 +1877,7 @@ a.link-chip:hover { border-color: var(--accent); text-decoration: none; }
 .prep-card, .fe-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }
 .pc-time { min-width: 84px; border-right: 1px solid var(--border); padding-right: 16px; color: var(--text-dim); }
 .pc-head h3 { color: var(--text); }
+.pc-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pc-desc { color: var(--text-dim); }
 .pc-link { background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); }
 .pc-link:hover { border-color: var(--accent); }
