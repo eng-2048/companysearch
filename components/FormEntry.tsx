@@ -305,14 +305,6 @@ export default function FormEntry({
         </div>
       </div>
 
-      <p className="fe-note">
-        Your running to-do list of forms to submit. Hit <strong>Draft form</strong> to draft the
-        First Meeting Deal Feedback form and open it pre-filled, or <strong>✕</strong> to move a
-        meeting that doesn&apos;t need one to the <strong>Removed</strong> section below (you can
-        restore it there). Meetings whose form is already submitted in Airtable fall off
-        automatically.
-      </p>
-
       {loading && !data && (
         <div className="status-line">
           <span className="spinner" />

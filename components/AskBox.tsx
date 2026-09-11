@@ -66,11 +66,6 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
           {busy ? "Thinking…" : "Ask"}
         </button>
       </form>
-      <div className="ask-hint">
-        Answers only from the materials on file — the Grain call transcript, the deck (when saved in
-        Drive), notes, emails, and the #deals-{"{company}"} Slack channel.
-      </div>
-
       {[...history].reverse().map((item, i) => (
         <div className="ask-qa" key={history.length - 1 - i}>
           <div className="ask-q">{item.q}</div>
