@@ -16,19 +16,23 @@ function statusClass(status?: string): string {
   return "st-neutral";
 }
 
-function LinkChip({ label, link }: { label: string; link?: Sourced }) {
+function LinkChip({ icon, label, link }: { icon: string; label: string; link?: Sourced }) {
   const has = link && link.value && link.sources[0] !== "unknown";
-  return (
-    <div className="link-chip">
-      <span className="label">{label}</span>
-      {has ? (
-        <a href={link!.value} target="_blank" rel="noreferrer">
-          Open ↗
-        </a>
-      ) : (
-        <span className="absent">not on file</span>
-      )}
-    </div>
+  const inner = (
+    <>
+      <span className="lc-ic">{icon}</span>
+      <span className="lc-body">
+        <span className="label">{label}</span>
+        <span className={has ? "lc-val" : "absent"}>{has ? "Open ↗" : "not on file"}</span>
+      </span>
+    </>
+  );
+  return has ? (
+    <a className="link-chip" href={link!.value} target="_blank" rel="noreferrer">
+      {inner}
+    </a>
+  ) : (
+    <div className="link-chip is-absent">{inner}</div>
   );
 }
 
@@ -76,9 +80,20 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
   const [open, setOpen] = useState(false);
   const b = bundle;
 
-  const tagline = [b.identity.verticals?.join(", "), b.identity.location]
+  // Founded may be a full ISO date — show just the year.
+  const foundedYear = b.identity.founded?.match(/\d{4}/)?.[0];
+  const tagline = [b.identity.verticals?.join(", "), b.identity.location, foundedYear ? `Founded ${foundedYear}` : ""]
     .filter(Boolean)
-    .join(" · ");
+    .join("  ·  ");
+
+  // At-a-glance facts strip — only the fields we actually have, capped at 4.
+  const introBy = b.introSource?.value || b.emailThread?.intro;
+  const facts: { k: string; v: string; hl?: boolean }[] = [];
+  if (b.identity.capitalRaising) facts.push({ k: "Raising", v: b.identity.capitalRaising, hl: true });
+  if (b.identity.capitalRaised) facts.push({ k: "Raised", v: b.identity.capitalRaised });
+  if (introBy) facts.push({ k: "Intro'd by", v: introBy });
+  if (b.identity.location && facts.length < 4) facts.push({ k: "Location", v: b.identity.location });
+  const factCols = Math.min(facts.length, 4) || 1;
 
   // Visual timeline: intro, then meetings oldest → newest.
   const introDate = b.emailThread?.messages[0]?.date;
@@ -107,18 +122,30 @@ export default function ResultCard({ bundle }: { bundle: ContextBundle }) {
         </div>
       </div>
 
+      {/* ---- Facts strip ---- */}
+      {facts.length > 0 && (
+        <div className="facts" style={{ gridTemplateColumns: `repeat(${factCols}, 1fr)` }}>
+          {facts.map((f) => (
+            <div className="fact" key={f.k}>
+              <div className="k">{f.k}</div>
+              <div className={`v${f.hl ? " hl" : ""}`}>{f.v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ---- Description ---- */}
       {b.identity.description && <div className="card-summary">{b.identity.description}</div>}
 
       {/* ---- Links ---- */}
       <div className="links">
-        <LinkChip label="Deck" link={b.links.deck} />
-        <LinkChip label="CEO LinkedIn" link={b.links.ceoLinkedin} />
-        <LinkChip label="CTO LinkedIn" link={b.links.ctoLinkedin} />
-        <LinkChip label="Website" link={b.links.website} />
-        <LinkChip label="Deal folder" link={b.links.dealFolder} />
-        {b.regime === "past" && <LinkChip label="Recording" link={b.links.recording} />}
-        <LinkChip label="Attio Record" link={b.links.attioRecord} />
+        <LinkChip icon="📊" label="Deck" link={b.links.deck} />
+        <LinkChip icon="in" label="CEO LinkedIn" link={b.links.ceoLinkedin} />
+        <LinkChip icon="in" label="CTO LinkedIn" link={b.links.ctoLinkedin} />
+        <LinkChip icon="🌐" label="Website" link={b.links.website} />
+        <LinkChip icon="📁" label="Deal folder" link={b.links.dealFolder} />
+        {b.regime === "past" && <LinkChip icon="🎬" label="Recording" link={b.links.recording} />}
+        <LinkChip icon="📇" label="Attio Record" link={b.links.attioRecord} />
       </div>
 
       {/* ---- Expander ---- */}

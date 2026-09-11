@@ -175,23 +175,36 @@ export default function Home() {
     </button>
   );
 
+  const view = prepMode ? "prep" : formMode ? "form" : "search";
+
   return (
     <div className="wrap">
       <div className="masthead">
-        <h1>Company Search</h1>
-        <span className="brand">2048 Ventures</span>
-        <div className="mast-actions">
-          <button className="prep-btn" onClick={() => openPrep()}>
+        <div className="brandbar">
+          <span className="brand-plate">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/2048-ventures.jpg" alt="2048 Ventures" />
+          </span>
+          <span className="app-title">Company&nbsp;Search</span>
+        </div>
+        <nav className="seg" aria-label="Views">
+          <button
+            className={view === "search" ? "on" : ""}
+            onClick={() => {
+              setPrepMode(false);
+              setFormMode(false);
+            }}
+          >
+            Search
+          </button>
+          <button className={view === "prep" ? "on" : ""} onClick={() => openPrep()}>
             Meeting Prep
           </button>
-          <button className="prep-btn" onClick={() => openForm()}>
+          <button className={view === "form" ? "on" : ""} onClick={() => openForm()}>
             Form Entry
           </button>
-        </div>
+        </nav>
       </div>
-      <p className="subtitle">
-        Search a company or founder — or pick one of this week&apos;s meetings to prep.
-      </p>
 
       {prepMode ? (
         <MeetingPrep
@@ -205,6 +218,10 @@ export default function Home() {
         {/* Form Entry stays mounted (just hidden) so drafted cards + edits
             survive navigating back to Search. */}
         <div hidden={formMode}>
+      <div className="hero">
+        <h1>Everything we know, in one place.</h1>
+        <p>Search a company or founder — or jump to one of this week&apos;s meetings.</p>
+      </div>
       <form
         className="searchbar"
         onSubmit={(e) => {
@@ -213,6 +230,10 @@ export default function Home() {
         }}
       >
         <div className="combo" ref={comboRef}>
+          <svg className="search-ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
           <input
             type="text"
             placeholder="e.g. Verno · Autonomy Health · a founder's name"

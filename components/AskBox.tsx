@@ -16,8 +16,14 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
   const [history, setHistory] = useState<QA[]>([]);
   const [busy, setBusy] = useState(false);
 
-  async function ask() {
-    const question = q.trim();
+  const EXAMPLES = [
+    "What did they say about competition?",
+    "How big is the round?",
+    "Summarize the last call",
+  ];
+
+  async function ask(preset?: string) {
+    const question = (preset ?? q).trim();
     if (!question || busy) return;
     setBusy(true);
     setQ("");
@@ -48,7 +54,9 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
 
   return (
     <div className="ask">
-      <div className="ask-head">Ask about {bundle.company}</div>
+      <div className="ask-head">
+        <span className="ask-spark" aria-hidden="true">✦</span> Ask about {bundle.company}
+      </div>
       <form
         className="ask-bar"
         onSubmit={(e) => {
@@ -59,13 +67,22 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Ask anything — e.g. “what did they say about competition?”, “how big is the round?”"
+          placeholder="Ask anything about the materials on file…"
           disabled={busy}
         />
         <button type="submit" disabled={busy || !q.trim()}>
           {busy ? "Thinking…" : "Ask"}
         </button>
       </form>
+      {history.length === 0 && (
+        <div className="ask-prompts">
+          {EXAMPLES.map((ex) => (
+            <button key={ex} type="button" className="ask-prompt" onClick={() => ask(ex)} disabled={busy}>
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
       {[...history].reverse().map((item, i) => (
         <div className="ask-qa" key={history.length - 1 - i}>
           <div className="ask-q">{item.q}</div>
@@ -77,7 +94,16 @@ export default function AskBox({ bundle }: { bundle: ContextBundle }) {
           ) : item.a ? (
             <>
               <div className="ask-a">{item.a}</div>
-              {item.used?.length ? <div className="ask-used">Sources: {item.used.join(" · ")}</div> : null}
+              {item.used?.length ? (
+                <div className="ask-used">
+                  <span className="ask-used-lbl">Sources</span>
+                  {item.used.map((u, ui) => (
+                    <span className="ask-src" key={ui}>
+                      {u}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="ask-note">⚠ {item.note}</div>
