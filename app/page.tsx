@@ -185,8 +185,6 @@ export default function Home() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/2048-logo.jpg" alt="2048 Ventures" />
           </span>
-          <span className="brand-div" />
-          <span className="app-title">Company&nbsp;Search</span>
         </div>
         <nav className="seg" aria-label="Views">
           <button
@@ -220,8 +218,7 @@ export default function Home() {
             survive navigating back to Search. */}
         <div hidden={formMode}>
       <div className="hero">
-        <h1>Everything we know, in one place.</h1>
-        <p>Search a company or founder — or jump to one of this week&apos;s meetings.</p>
+        <h1>Company Search</h1>
       </div>
       <form
         className="searchbar"
@@ -248,11 +245,12 @@ export default function Home() {
           />
           {showDrop && (
             <div className="dropdown">
-              <div className="dd-hint">Your meetings · past & upcoming week</div>
-              {up.length > 0 && <div className="dd-group">Upcoming</div>}
-              {up.map(Row)}
               {rec.length > 0 && <div className="dd-group">Recent</div>}
               {rec.map(Row)}
+              {up.length > 0 && (
+                <div className={`dd-group${rec.length > 0 ? " dd-group-sep" : ""}`}>Upcoming</div>
+              )}
+              {up.map(Row)}
             </div>
           )}
         </div>

@@ -1755,8 +1755,8 @@ a:hover { color: #8f0c1b; }
 .seg button.on { background: var(--bg-inset); color: var(--text); box-shadow: none; }
 
 /* ---- hero + search ---- */
-.hero { margin-bottom: 0; }
-.hero h1 { font-size: 30px; font-weight: 680; letter-spacing: -0.028em; margin-bottom: 7px; }
+.hero { margin-bottom: 16px; }
+.hero h1 { font-size: 30px; font-weight: 680; letter-spacing: -0.028em; margin-bottom: 0; }
 .hero p { color: var(--text-dim); font-size: 14.5px; margin-bottom: 18px; }
 .searchbar { margin-bottom: 14px; }
 .search-ic { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; z-index: 1; }
@@ -1909,3 +1909,8 @@ a.link-chip:hover { border-color: var(--accent); text-decoration: none; }
 .error-box { background: rgba(185, 28, 28, 0.06); border: 1px solid rgba(185, 28, 28, 0.3); color: #b91c1c; }
 .empty-note, .prep-day-empty, .footer-note { color: var(--text-faint); }
 .email-flag { color: var(--text-dim); }
+
+/* dropdown: sticky group headers + clear separation between Recent / Upcoming */
+.dropdown { max-height: 340px; padding-top: 0; }
+.dd-group { position: sticky; top: 0; z-index: 2; background: #fff; padding: 10px 11px 6px; }
+.dd-group-sep { border-top: 1px solid var(--border); margin-top: 5px; padding-top: 10px; }
