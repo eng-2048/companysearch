@@ -149,13 +149,48 @@ export async function gatherContext(
   }
   terms.push(query.replace(/\(.*?\)/g, "").trim());
 
+  // Confirm signals: the emails/domains that prove a Grain call is really this
+  // company. They let us match a recording whose title never names the company —
+  // matched instead by who was on the call (e.g. a call titled "Demo Day between
+  // Jasper L and Zann Ali" recovered via jasper@impact-drones.com).
+  const GENERIC_EMAIL_DOMAINS = new Set([
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
+    "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com", "2048.vc",
+  ]);
+  const GENERIC_LOCALS = new Set([
+    "info", "team", "hello", "contact", "sales", "admin", "support", "help",
+    "founders", "founder", "deals", "ir", "pr", "hi", "hey",
+  ]);
+  const knownEmails = [
+    ...new Set(
+      [...(attio.emails || []), ...attio.people.flatMap((p) => p.emails), ...(opts.emailHints || [])]
+        .map((e) => e.toLowerCase().trim())
+        .filter(Boolean)
+    ),
+  ];
+  const knownDomains = [
+    ...new Set(
+      [attio.featuredCompany?.domain, ...knownEmails.map((e) => e.split("@")[1])]
+        .filter((d): d is string => !!d)
+        .map((d) => d.toLowerCase())
+    ),
+  ].filter((d) => !GENERIC_EMAIL_DOMAINS.has(d));
+  // Soft title seeds — surface a call named after the person, then confirm by domain.
+  const softTerms = [
+    ...new Set(
+      [attio.founderName, ...knownEmails.map((e) => e.split("@")[0])]
+        .filter((t): t is string => !!t && t.trim().length >= 3)
+        .map((t) => t.trim())
+    ),
+  ].filter((t) => !GENERIC_LOCALS.has(t.toLowerCase()));
+
   // Prep mode (attioOnly) skips the heavy Grain/Calendar/Email passes — it only
   // needs identity + links, and runs once per meeting so speed matters.
   let grain: GrainResolution = { recordings: [], externalPeople: [], emails: [] };
   let grainError: string | undefined;
   if (!opts.attioOnly) {
     try {
-      grain = await resolveGrain(terms);
+      grain = await resolveGrain(terms, { emails: knownEmails, domains: knownDomains, softTerms });
     } catch (e: any) {
       grainError = e?.message || "Grain lookup failed";
     }

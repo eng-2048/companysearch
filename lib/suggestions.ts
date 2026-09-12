@@ -41,6 +41,31 @@ const STOP = new Set([
 
 const isStop = (norm: string) => norm.length < 2 || STOP.has(norm);
 
+// Generic mail providers — never a company key.
+const GENERIC_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com",
+  "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com",
+]);
+
+/** The company label from an email domain: impact-drones.com → "impact-drones".
+ *  Undefined for internal/generic domains. */
+function companyLabelFromDomain(domain?: string): string | undefined {
+  const d = (domain || "").toLowerCase();
+  if (!d || d === INTERNAL_DOMAIN || GENERIC_EMAIL_DOMAINS.has(d)) return undefined;
+  const parts = d.split(".");
+  if (parts.length < 2) return undefined;
+  const second = new Set(["co", "com", "org", "net", "gov", "ac"]);
+  const label = parts.length >= 3 && second.has(parts[parts.length - 2])
+    ? parts[parts.length - 3]
+    : parts[parts.length - 2];
+  return label || undefined;
+}
+
+// A title yields a poor search term when it's a generic-event phrase or a long
+// clause rather than a company/person name — then the email domain is better.
+const WEAK_TERM = /\b(demo\s*day|between|pitch|semi-?finals?|competition|catch\s*up|coffee|office hours|fundraising)\b/i;
+const isWeakTerm = (term: string) => WEAK_TERM.test(term) || term.trim().split(/\s+/).length > 3;
+
 /** Infer the company/founder to search from a meeting title. */
 function deriveTerm(title: string, internalNameTokens: Set<string>): string | undefined {
   const segments = title.split(SPLIT).map((s) => s.trim()).filter(Boolean);
@@ -112,7 +137,19 @@ function eventToDayMeeting(ev: GCalEvent, teamTokens: string[]): DayMeeting | nu
   }
   if (!hasExternal) return null;
 
-  const term = deriveTerm(ev.title, internalTokens);
+  const titleTerm = deriveTerm(ev.title, internalTokens);
+  // The external attendee's company domain is the most reliable key — prefer it
+  // when the title gives a weak term (e.g. "Demo Day between Jasper L …" whose
+  // only real handle is jasper@impact-drones.com → "impact-drones").
+  let domainTerm: string | undefined;
+  for (const a of attendees) {
+    const label = companyLabelFromDomain((a.email || "").split("@")[1]);
+    if (label) {
+      domainTerm = label;
+      break;
+    }
+  }
+  const term = titleTerm && !isWeakTerm(titleTerm) ? titleTerm : domainTerm || titleTerm;
   if (!term) return null;
 
   return {
@@ -230,35 +267,21 @@ export async function getMeetingSuggestions(
   const best = new Map<string, MeetingSuggestion>();
 
   for (const ev of events) {
-    if (/^grain data for/i.test(ev.title)) continue;
-    const attendees = ev.attendees || [];
-    if (attendees.length === 0 || attendees.length > 12) continue; // skip solo blocks + big group events
-
-    const internalTokens = new Set<string>(teamTokens);
-    let hasExternal = false;
-    for (const a of attendees) {
-      const dom = (a.email || "").split("@")[1]?.toLowerCase();
-      if (!dom) continue;
-      if (dom === INTERNAL_DOMAIN) {
-        if (a.name) for (const t of normalize(a.name).split(" ")) if (t.length > 2) internalTokens.add(t);
-      } else {
-        hasExternal = true;
-      }
-    }
-    if (!hasExternal) continue; // internal-only meeting
-
-    const term = deriveTerm(ev.title, internalTokens);
-    if (!term) continue;
-    const key = normalize(term);
+    // Use the shared event → meeting logic so the suggestions list can't diverge
+    // from Prep / Form Entry (it also folds in an external organizer who isn't a
+    // listed attendee — e.g. a founder who created the invite).
+    const dm = eventToDayMeeting(ev, teamTokens);
+    if (!dm) continue;
+    const key = normalize(dm.term);
     if (!key) continue;
 
     const sug: MeetingSuggestion = {
-      term,
-      title: ev.title,
-      date: ev.startISO.slice(0, 10),
-      time: ev.allDay ? undefined : ev.startISO.slice(11, 16),
+      term: dm.term,
+      title: dm.title,
+      date: dm.startISO.slice(0, 10),
+      time: dm.time,
       // time-based: a meeting earlier today is already past
-      upcoming: ev.upcoming,
+      upcoming: dm.upcoming,
     };
 
     // One entry per company: prefer an upcoming meeting (soonest); else the most recent.

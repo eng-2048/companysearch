@@ -103,33 +103,72 @@ function toParticipants(detail: any): GrainParticipant[] {
   }));
 }
 
+/** Extra signals to match recordings the title alone can't. */
+export interface GrainConfirm {
+  /** External emails that confirm a recording is this company's. */
+  emails?: string[];
+  /** External email domains that confirm a recording (e.g. "impact-drones.com"). */
+  domains?: string[];
+  /** Surface-only title seeds (founder first name, email local part). Recordings
+   *  found via these are kept ONLY if a participant email/domain confirms them —
+   *  so a bare first name doesn't drag in unrelated calls. */
+  softTerms?: string[];
+}
+
 /**
  * Resolve Grain content for a company/founder.
- * @param terms  candidate names to match titles against (company name, founder name…)
+ * @param terms   strong title terms (company name, founder full name…) — a
+ *                whole-word title match is accepted on its own.
+ * @param confirm participant emails/domains + soft title seeds, so a recording
+ *                whose title never names the company can still be matched by who
+ *                was on the call (e.g. "Demo Day between Jasper L and Zann Ali"
+ *                matched via jasper@impact-drones.com).
  */
-export async function resolveGrain(terms: string[]): Promise<GrainResolution> {
-  const cleanTerms = [...new Set(terms.map((t) => t.trim()).filter(Boolean))];
-  if (cleanTerms.length === 0) {
+export async function resolveGrain(
+  terms: string[],
+  confirm: GrainConfirm = {}
+): Promise<GrainResolution> {
+  const strongTerms = [...new Set(terms.map((t) => t.trim()).filter(Boolean))];
+  const softTerms = [...new Set((confirm.softTerms || []).map((t) => t.trim()).filter(Boolean))].filter(
+    (t) => !strongTerms.some((s) => s.toLowerCase() === t.toLowerCase())
+  );
+  const confirmEmails = new Set((confirm.emails || []).map((e) => e.toLowerCase()).filter(Boolean));
+  const confirmDomains = new Set((confirm.domains || []).map((d) => d.toLowerCase()).filter(Boolean));
+  const canConfirm = confirmEmails.size > 0 || confirmDomains.size > 0;
+
+  if (strongTerms.length === 0 && softTerms.length === 0) {
     return { recordings: [], externalPeople: [], emails: [] };
   }
 
-  // 1) Title search for each term, unioned and deduped by recording id.
-  const listResults = await Promise.all(cleanTerms.map((t) => searchTitle(t)));
+  // 1) Title search for every term (strong + soft), unioned and deduped by id.
+  const listResults = await Promise.all([...strongTerms, ...softTerms].map((t) => searchTitle(t)));
   const byId = new Map<string, any>();
   for (const list of listResults) {
     for (const rec of list) if (rec?.id) byId.set(rec.id, rec);
   }
 
-  // 2) Keep only WHOLE-WORD title matches — this is what drops "Vernon" for "Verno".
-  const matched = [...byId.values()].filter((rec) =>
-    cleanTerms.some((t) => wholeWordMatch(rec.title || "", t))
-  );
+  const strongTitle = (rec: any) => strongTerms.some((t) => wholeWordMatch(rec.title || "", t));
+  const participantConfirmed = (participants: GrainParticipant[]) =>
+    participants.some((p) => {
+      const em = (p.email || "").toLowerCase();
+      if (!em) return false;
+      if (confirmEmails.has(em)) return true;
+      const dom = em.split("@")[1];
+      return !!dom && confirmDomains.has(dom);
+    });
 
-  // Most recent first; bound how many details we fetch.
-  matched.sort((a, b) =>
-    String(b.start_datetime || "").localeCompare(String(a.start_datetime || ""))
+  // 2) Without confirm signals, keep the original behaviour: only WHOLE-WORD title
+  // matches (drops "Vernon" for "Verno"). With them, keep every candidate for now
+  // and decide per-recording below (title match OR participant confirmation).
+  const pool = canConfirm ? [...byId.values()] : [...byId.values()].filter(strongTitle);
+
+  // Strong-title matches first, then most recent; bound how many details we fetch.
+  pool.sort(
+    (a, b) =>
+      Number(strongTitle(b)) - Number(strongTitle(a)) ||
+      String(b.start_datetime || "").localeCompare(String(a.start_datetime || ""))
   );
-  const toFetch = matched.slice(0, MAX_DETAIL_FETCHES);
+  const toFetch = pool.slice(0, canConfirm ? MAX_DETAIL_FETCHES + 8 : MAX_DETAIL_FETCHES);
 
   // 3) Fetch details (participants) in parallel.
   const details = await Promise.all(toFetch.map((rec) => getDetail(rec.id)));
@@ -141,6 +180,11 @@ export async function resolveGrain(terms: string[]): Promise<GrainResolution> {
   toFetch.forEach((rec, i) => {
     const detail = details[i] || rec;
     const participants = toParticipants(detail);
+
+    // Keep on a whole-word title match, or when a participant email/domain confirms
+    // it — the latter recovers calls whose title never mentions the company.
+    if (!strongTitle(rec) && !participantConfirmed(participants)) return;
+
     recordings.push({
       id: rec.id,
       title: rec.title || "(untitled)",
