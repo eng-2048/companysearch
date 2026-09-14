@@ -7,7 +7,7 @@
 // pre-filled form and submits it himself. The judgment fields (Recommendation,
 // Tags, Other Notes) are always left for the user, exactly as the skill does.
 
-import { resolveEntity, AttioResolution, DealFlow } from "./attio";
+import { resolveEntity, AttioResolution, DealFlow, closedDealFlow } from "./attio";
 import { getPastDaysMeetings, companyTermsForEmail, DayMeeting } from "./suggestions";
 import { resolveGrain, getTranscript } from "./grain";
 import { draftNotes, extractEquity, extractRound } from "./notesDraft";
@@ -400,8 +400,20 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
   const { configured, meetings } = await getPastDaysMeetings(numDays);
   if (!configured) return { configured: false, meetings: [] };
 
+  // Existing portfolio / closed deals don't need a first-meeting feedback form —
+  // exclude them. Matching by attendee domain lets us skip resolving them at all,
+  // which also cuts the cold-scan time.
+  const closed = await closedDealFlow();
+  const isClosedDomain = (mm: DayMeeting) =>
+    externalAttendees(mm).some((a) => {
+      const d = (a.email || "").split("@")[1]?.toLowerCase();
+      return !!d && closed.domains.has(d);
+    });
+
   const items = await Promise.all(
     meetings.map(async ({ date, m }) => {
+      if (isClosedDomain(m)) return null; // portfolio/closed — skip (and don't resolve)
+
       const ext = externalAttendees(m);
       const person =
         ext.find((a) => a.name && /\s/.test(a.name))?.name ||
@@ -411,6 +423,9 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
       // Resolve the real company name from Attio; fall back to the email domain,
       // then the title-derived term (never an internal name like "Zann Ali").
       const resolved = await resolveToAttio(m);
+      // Personal-email meetings resolve to a company that may still be closed.
+      const rid = resolved?.attio.featuredCompany?.recordId;
+      if (rid && closed.records.has(rid)) return null;
       const company =
         (resolved ? cleanName(resolved.attio.featuredCompany!.name) : undefined) ||
         companyFromEmail(ext[0]?.email) ||
@@ -430,11 +445,11 @@ export async function listRecentMeetings(numDays = 3): Promise<FormEntryList> {
         // person/term when unresolved), so dismissing one meeting is durable.
         key: hashKey(`${date}|${squish(company || person || m.term)}`),
         // The Attio record id — the reliable key for matching a submitted form.
-        recordId: resolved?.attio.featuredCompany?.recordId,
+        recordId: rid,
       };
     })
   );
-  return { configured: true, meetings: items };
+  return { configured: true, meetings: items.filter((x): x is NonNullable<typeof x> => x !== null) };
 }
 
 export interface DraftInput {

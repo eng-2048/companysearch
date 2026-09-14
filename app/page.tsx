@@ -234,7 +234,7 @@ export default function Home() {
           </svg>
           <input
             type="text"
-            placeholder="e.g. Verno · Autonomy Health · a company name"
+            placeholder="a company name"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

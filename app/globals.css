@@ -1871,7 +1871,9 @@ a.link-chip:hover { border-color: var(--accent); text-decoration: none; }
 .pill-up { color: #157f3c; background: rgba(21, 128, 61, 0.1); }
 
 /* ---- meeting prep + form entry ---- */
-.prep-head h2 { font-size: 20px; letter-spacing: -0.02em; color: var(--text); }
+/* Match the Company Search hero size. */
+.prep-head h2 { font-size: 30px; font-weight: 680; letter-spacing: -0.028em; color: var(--text); }
+.prep-title { align-items: baseline; }
 .prep-updated, .fe-when, .pc-attendees, .fe-attendees { color: var(--text-faint); }
 .prep-day-head { text-transform: uppercase; color: var(--text-faint); border-bottom: none; }
 .prep-card, .fe-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }

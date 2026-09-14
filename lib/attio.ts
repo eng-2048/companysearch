@@ -1003,6 +1003,72 @@ export async function listDealsByStatus(
   return out;
 }
 
+/**
+ * The set of companies that are already closed / portfolio (or otherwise "done")
+ * in the deal_flow pipeline — returned as both their record ids and their email
+ * domains, so a meeting can be excluded cheaply (by attendee domain) without
+ * resolving it. Cached briefly; the pipeline changes rarely within a session.
+ */
+export interface ClosedDealSet {
+  domains: Set<string>;
+  records: Set<string>;
+}
+let closedCache: { at: number; value: ClosedDealSet } | null = null;
+const CLOSED_TTL_MS = 30 * 60 * 1000;
+
+export async function closedDealFlow(): Promise<ClosedDealSet> {
+  if (closedCache && Date.now() - closedCache.at < CLOSED_TTL_MS) return closedCache.value;
+
+  // Closed-like pipeline statuses — the invested / about-to-invest / portfolio
+  // bucket ("Closed", "Closing", …). These deals don't need a first-meeting form.
+  let statuses: string[] = [];
+  try {
+    statuses = (await listStatuses()).filter((s) => {
+      const t = s.trim().toLowerCase();
+      return t.startsWith("clos") || t.includes("portfolio") || t.includes("invest");
+    });
+  } catch {
+    /* fall back below */
+  }
+  if (!statuses.length) statuses = ["Closed"];
+
+  const records = new Set<string>();
+  for (const st of statuses) {
+    try {
+      for (const d of await listDealsByStatus(st, 500)) records.add(d.recordId);
+    } catch {
+      /* best-effort per status */
+    }
+  }
+
+  // Fetch domains in batches (record_id $in, 50 at a time) — a few calls instead
+  // of one per company.
+  const domains = new Set<string>();
+  const ids = [...records];
+  const CHUNK = 50;
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const r = await api(`/objects/${COMPANIES_OBJECT}/records/query`, {
+          filter: { record_id: { $in: chunk } },
+          limit: CHUNK,
+        });
+        for (const rec of r.data || []) {
+          for (const dom of recordDomains(rec)) if (dom) domains.add(dom.toLowerCase());
+        }
+      } catch {
+        /* skip a batch we can't read */
+      }
+    })
+  );
+
+  const value: ClosedDealSet = { domains, records };
+  closedCache = { at: Date.now(), value };
+  return value;
+}
+
 /** The display name of a company record (for confirming a manual Attio link). */
 export async function getCompanyName(recordIdStr: string): Promise<string | undefined> {
   const rec = await getRecord(COMPANIES_OBJECT, recordIdStr);
