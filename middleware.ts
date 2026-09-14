@@ -15,12 +15,14 @@ export async function middleware(req: NextRequest) {
   if (!pw) return NextResponse.next(); // auth disabled
 
   const { pathname } = req.nextUrl;
-  // Always-open: the login page + its API, Next internals, favicon.
+  // Always-open: the login page + its API, Next internals, favicon, and static
+  // assets (e.g. the logo shown on the login screen before you're signed in).
   if (
     pathname === "/login" ||
     pathname === "/api/login" ||
     pathname.startsWith("/_next/") ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    /\.(?:jpg|jpeg|png|gif|svg|webp|ico|css|js|woff2?|ttf|map)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }
