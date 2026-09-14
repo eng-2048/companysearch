@@ -5,7 +5,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const DIR = path.join(process.cwd(), ".data");
+// Overridable so a hosted deploy can point it at a persistent disk (DATA_DIR).
+const DIR = process.env.DATA_DIR || path.join(process.cwd(), ".data");
 const fileFor = (store: string) => path.join(DIR, `${store}.json`);
 
 export async function readDismissed(store: string): Promise<Set<string>> {

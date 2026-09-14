@@ -1,0 +1,48 @@
+# Render blueprint. In Render: New → Blueprint → pick this repo. It creates the
+# web service + a 1 GB persistent disk. Fill in the secret values (sync:false)
+# in the dashboard — they are NOT stored in git.
+services:
+  - type: web
+    name: company-search
+    runtime: node
+    plan: starter # needed for a persistent disk (~$7/mo)
+    region: ohio # closest US-East region to ET
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    autoDeploy: true
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # --- config (safe to commit) ---
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATA_DIR
+        value: /var/data/data
+      - key: CACHE_DIR
+        value: /var/data/cache
+      - key: ENABLE_CRON
+        value: "1"
+      - key: PREWARM_HOUR
+        value: "7"
+      # --- secrets (set these in the Render dashboard) ---
+      - key: APP_PASSWORD # the shared login password (you choose this)
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ATTIO_API_KEY
+        sync: false
+      - key: GRAIN_PAT
+        sync: false
+      - key: AIRTABLE_API_KEY
+        sync: false
+      - key: SLACK_USER_TOKEN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false

@@ -11,7 +11,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { normalize } from "./match";
 
-const DIR = path.join(process.cwd(), ".data");
+const DIR = process.env.DATA_DIR || path.join(process.cwd(), ".data");
 const FILE = path.join(DIR, "attio-links.json");
 
 interface Link {

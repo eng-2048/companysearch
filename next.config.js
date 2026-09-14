@@ -5,6 +5,8 @@ const nextConfig = {
   // route handler loads it at runtime instead of the bundler trying to inline it.
   experimental: {
     serverComponentsExternalPackages: ["pdf-parse"],
+    // Enable instrumentation.ts (the daily pre-warm scheduler) on Next 14.
+    instrumentationHook: true,
   },
 };
 

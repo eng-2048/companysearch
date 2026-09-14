@@ -6,7 +6,8 @@
 import { promises as fs } from "fs";
 import path from "path";
 
-const CACHE_DIR = path.join(process.cwd(), ".cache");
+// Overridable so a hosted deploy can point it at a persistent disk (CACHE_DIR).
+const CACHE_DIR = process.env.CACHE_DIR || path.join(process.cwd(), ".cache");
 
 /** Local YYYY-MM-DD (server clock = the user's machine). */
 export function localDateKey(d = new Date()): string {

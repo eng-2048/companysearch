@@ -1917,3 +1917,26 @@ a.link-chip:hover { border-color: var(--accent); text-decoration: none; }
 .dropdown { max-height: 340px; padding-top: 0; }
 .dd-group { position: sticky; top: 0; z-index: 2; background: #fff; padding: 10px 11px 6px; }
 .dd-group-sep { border-top: 1px solid var(--border); margin-top: 5px; padding-top: 10px; }
+
+/* ---- Login (shared-password gate) ---- */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-card {
+  width: 100%; max-width: 360px; background: #fff; border: 1px solid var(--border);
+  border-radius: 18px; padding: 30px 26px; box-shadow: 0 30px 70px -46px rgba(15, 23, 42, 0.15);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.login-brand { display: flex; justify-content: center; margin-bottom: 4px; }
+.login-brand img { height: 30px; width: auto; mix-blend-mode: multiply; }
+.login-card h1 { font-size: 22px; font-weight: 680; letter-spacing: -0.02em; text-align: center; }
+.login-card p { color: var(--text-dim); font-size: 13.5px; text-align: center; margin-bottom: 6px; }
+.login-card input {
+  background: #fff; border: 1px solid var(--border-strong); border-radius: 12px;
+  padding: 13px 14px; font-size: 15px; color: var(--text); outline: none; font-family: var(--sans);
+}
+.login-card input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.login-card button {
+  background: linear-gradient(180deg, #e0142c, #b00f21); color: #fff; border: none;
+  border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.login-card button:disabled { opacity: 0.55; cursor: default; }
+.login-err { color: #b91c1c; font-size: 13px; text-align: center; }
